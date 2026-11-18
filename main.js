@@ -799,15 +799,18 @@ const handlers = {
     return false;
   },
   'update:check'() { return checkUpdate(true); },
-  'update:state'() { return { ...upd, current: thisVersion(), auto: canSelfUpdate() }; },
+  'update:state'() { const { _assets, ...u } = upd; return { ...u, current: thisVersion(), auto: canSelfUpdate() }; },
   async 'update:install'() {
     if (upd.status !== 'available') return upd;
     if (!canSelfUpdate()) { if (!HIDDEN && /^https:\/\//.test(upd.url || '')) shell.openExternal(upd.url); return upd; }
     pushUpd({ status: 'downloading', pct: 0 });
-    const u = getUpdater(); await u.checkForUpdates(); await u.downloadUpdate();
+    try {
+      if (isDeb()) await updateDeb();
+      else { const u = getUpdater(); await u.checkForUpdates(); await u.downloadUpdate(); }
+    } catch (e) { pushUpd({ status: 'error', error: String(e.message || e), manual: true }); }
     return upd;
   },
-  'update:restart'() { if (upd.status === 'ready') getUpdater().quitAndInstall(); return true; },
+  'update:restart'() { if (upd.status !== 'ready') return true; if (upd.via === 'deb') { app.relaunch(); app.exit(0); } else getUpdater().quitAndInstall(); return true; },
   'app:copy'(text) { clipboard.writeText(String(text)); return true; },
 };
 
@@ -817,9 +820,10 @@ const handlers = {
 const UPDATE_REPO = 'Madmaxx636/youtube-desktop';
 const thisVersion = () => process.env.YT_FAKE_VERSION || app.getVersion();
 const cmpVer = (a, b) => { const x = String(a).replace(/^v/, '').split('.').map(Number), y = String(b).replace(/^v/, '').split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0) ? 1 : -1; } return 0; };
-const canSelfUpdate = () => app.isPackaged && ((process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR) || (process.platform === 'linux' && !!process.env.APPIMAGE));
+const isDeb = () => !!process.env.YT_FAKE_DEB || (process.platform === 'linux' && app.isPackaged && !process.env.APPIMAGE && process.execPath.startsWith('/opt/')); // YT_FAKE_DEB is for tests
+const canSelfUpdate = () => isDeb() || app.isPackaged && ((process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR) || (process.platform === 'linux' && !!process.env.APPIMAGE));
 let upd = { status: 'idle', current: null };
-const pushUpd = (patch) => { upd = { ...upd, ...patch, current: thisVersion() }; for (const w of [win]) if (w && !w.isDestroyed()) w.webContents.send('update', upd); return upd; };
+const pushUpd = (patch) => { upd = { ...upd, ...patch, current: thisVersion() }; const { _assets, ...pub } = upd; for (const w of [win]) if (w && !w.isDestroyed()) w.webContents.send('update', pub); return pub; };
 let updater;
 function getUpdater() {
   if (updater) return updater;
@@ -831,17 +835,38 @@ function getUpdater() {
   return updater;
 }
 async function checkUpdate(manual) {
-  if (['downloading', 'ready'].includes(upd.status)) return upd;
+  if (['downloading', 'installing', 'ready'].includes(upd.status)) return upd;
   try {
     const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'youtube-desktop-updater' } });
     if (!r.ok) throw new Error('GitHub answered ' + r.status);
     const rel = await r.json();
     const v = String(rel.tag_name || '').replace(/^v/, '');
     if (!v || cmpVer(v, thisVersion()) <= 0) return pushUpd({ status: 'none', version: v, manual: !!manual });
+    upd._assets = rel.assets || [];
     return pushUpd({ status: 'available', version: v, url: rel.html_url, notes: String(rel.body || '').slice(0, 1500), auto: canSelfUpdate(), manual: !!manual });
   } catch (e) {
     return pushUpd({ status: manual ? 'error' : upd.status, error: String(e.message || e), manual: !!manual });
   }
+}
+
+// .deb installs: download the new .deb, check it against the release's SHA256SUMS, then let apt install it through the system password prompt (pkexec).
+async function updateDeb() {
+  const assets = upd._assets || [], deb = assets.find((a) => /_amd64\.deb$/.test(a.name)), sums = assets.find((a) => a.name === 'SHA256SUMS');
+  if (!deb || !sums) throw new Error('This release has no .deb to install.');
+  const dir = path.join(os.tmpdir(), 'youtube-desktop-update'); fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, deb.name);
+  const r = await fetch(deb.browser_download_url, { headers: { 'User-Agent': 'youtube-desktop-updater' } });
+  if (!r.ok) throw new Error('Download failed (' + r.status + ')');
+  const total = +r.headers.get('content-length') || deb.size || 0, out = fs.createWriteStream(file), hash = crypto.createHash('sha256');
+  let got = 0, last = 0;
+  for await (const chunk of r.body) { out.write(chunk); hash.update(chunk); got += chunk.length; if (total && Date.now() - last > 300) { last = Date.now(); pushUpd({ status: 'downloading', pct: Math.round((got / total) * 100) }); } }
+  await new Promise((res) => out.end(res));
+  const want = String(await (await fetch(sums.browser_download_url, { headers: { 'User-Agent': 'youtube-desktop-updater' } })).text()).split('\n').map((l) => l.trim().split(/\s+/)).find((x) => x[1] === deb.name)?.[0];
+  if (!want || want !== hash.digest('hex')) { fs.rmSync(file, { force: true }); throw new Error('The downloaded file did not match its published checksum, so it was not installed.'); }
+  pushUpd({ status: 'installing' });
+  await new Promise((res, rej) => execFile('pkexec', ['apt-get', 'install', '-y', '--allow-downgrades', file], { timeout: 5 * 60 * 1000 }, (err, _o, se) => (err ? rej(new Error(err.code === 126 || err.code === 127 ? 'Installing was cancelled.' : String(se || err.message).slice(0, 200))) : res())));
+  fs.rmSync(file, { force: true });
+  pushUpd({ status: 'ready', via: 'deb' });
 }
 let updTimer;
 function scheduleUpdateChecks() {

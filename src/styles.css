@@ -764,3 +764,13 @@ body.no-dim .card.watched,body.no-dim .subrow.watched,body.no-dim .vrow.watched{
 #update-bar[hidden]{display:none}
 #update-bar button{padding:6px 14px;border-radius:8px}
 #update-bar button.ghost{background:none;color:var(--fg2,#aaa)}
+.upd-panel{display:block!important;padding:14px 0}
+.upd-line{font-size:14px;line-height:1.5;margin-bottom:10px}
+.upd-prog{height:6px;border-radius:3px;background:var(--bg3,rgba(255,255,255,.12));overflow:hidden;margin-bottom:12px}
+.upd-prog i{display:block;height:100%;background:var(--accent,#f03);transition:width .2s}
+.upd-btns{display:flex;gap:8px}
+.upd-btns button{padding:8px 16px;border-radius:8px}
+.upd-btns .primary{background:var(--accent,#f03);color:#fff}
+.upd-btns button:disabled{opacity:.5}
+.upd-notes{margin:0 0 12px;font-size:13px;color:var(--fg2,#aaa)}
+.upd-notes pre{white-space:pre-wrap;font-family:inherit;margin:8px 0 0;max-height:180px;overflow:auto}

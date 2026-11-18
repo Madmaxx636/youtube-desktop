@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1
+
+- Settings, General, Updates is now a proper panel: your version, whether a newer one exists, what is new in it, a progress bar, and buttons to check, update and restart.
+- Updating works inside the app on every kind of install except the portable .exe: the Windows installer and the AppImage update themselves, and a .deb install downloads the new .deb, checks it against the release's published checksum, and installs it through the system password prompt before offering to restart.
+- The portable .exe still opens the download page.
+
+
 ## 0.7.0
 
 - Update notice: the app checks this project's GitHub releases at start-up and every six hours and shows "Version X is available" with Update / Later. Nothing installs without your click. The Windows installer and the AppImage download the update and restart into it; the .deb and the portable .exe open the release page instead.

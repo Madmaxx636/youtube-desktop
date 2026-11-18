@@ -44,7 +44,7 @@ const SCHEMA = {
       ] },
       { title: 'Updates', items: [
         { key: 'autoUpdateCheck', type: 'toggle', label: 'Check for new versions automatically', hint: 'Looks at this app\'s GitHub releases when it starts and every few hours. Nothing is installed without your OK.' },
-        { type: 'button', label: 'Check for updates now', action: 'checkUpdate' },
+        { type: 'updatepanel' },
       ] },
       { title: 'Reset', items: [{ type: 'button', label: 'Reset all settings to defaults', action: 'resetAll', danger: true }] },
     ] },

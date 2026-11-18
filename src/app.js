@@ -165,6 +165,7 @@ function settingRow(it) {
     case 'button': row.innerHTML = `<span class="lab"></span><button class="${it.danger ? 'danger' : ''}">${esc(it.label)}</button>`; row.querySelector('button').onclick = () => ACTIONS[it.action](); break;
     case 'file': row.innerHTML = `${lab}<input type="file" accept="${esc(it.accept || '')}">`; row.querySelector('input').onchange = async (e) => { const f = e.target.files[0]; if (f) await ACTIONS[it.action](f); e.target.value = ''; }; break;
     case 'info': row.className = 'sinfo'; row.textContent = it.text; break;
+    case 'updatepanel': row.className = 'upd-panel'; row.id = 'upd-panel'; queueMicrotask(() => paintUpdatePanel(lastUpd)); break;
     case 'subpreview': row.className = 'cue-preview'; row.innerHTML = '<span>This is how subtitles will look.</span>'; break;
   }
   return row;
@@ -2065,12 +2066,26 @@ paintBar();
 
 
 // ---------- app updates ----------
-let updDismissed = '';
+let updDismissed = '', lastUpd = null;
+function paintUpdatePanel(u) {
+  const el = $('#upd-panel'); if (!el) return;
+  u = u || { status: 'idle', current: '' };
+  const ver = esc(u.current || ''), v = esc(u.version || '');
+  const how = u.auto ? 'It downloads and installs here.' : 'This copy cannot replace itself, so the button opens the download page.';
+  const line = { idle: `You have version ${ver}.`, none: `You have version ${ver}, the latest.`, available: `Version <b>${v}</b> is available (you have ${ver}). ${how}`, downloading: `Downloading version ${v}… ${u.pct || 0}%`, installing: `Installing version ${v}… approve the password prompt if one appears.`, ready: `Version ${v} is installed. Restart to use it.`, error: `Problem: ${esc(u.error || 'unknown')}` }[u.status] || '';
+  const busy = ['downloading', 'installing'].includes(u.status);
+  el.innerHTML = `<div class="upd-line">${line}</div>${u.status === 'downloading' ? `<div class="upd-prog"><i style="width:${u.pct || 0}%"></i></div>` : ''}${u.status === 'available' && u.notes ? `<details class="upd-notes"><summary>What is new</summary><pre>${esc(u.notes.split('SHA-256')[0].trim())}</pre></details>` : ''}<div class="upd-btns"><button data-a="check" ${busy ? 'disabled' : ''}>Check for updates</button>${u.status === 'available' ? `<button data-a="go" class="primary">${u.auto ? 'Update now' : 'Open download page'}</button>` : ''}${u.status === 'ready' ? '<button data-a="restart" class="primary">Restart now</button>' : ''}</div>`;
+  el.querySelector('[data-a=check]')?.addEventListener('click', async () => { el.querySelector('.upd-line').textContent = 'Checking…'; try { await api.updateCheck(); } catch (e) { paintUpdatePanel({ status: 'error', error: e.message, current: u.current }); } });
+  el.querySelector('[data-a=go]')?.addEventListener('click', () => { updDismissed = ''; api.updateInstall().catch((e) => toast('Update failed: ' + e.message)); });
+  el.querySelector('[data-a=restart]')?.addEventListener('click', () => api.updateRestart());
+}
 function paintUpdate(u) {
   const bar = $('#update-bar'); if (!u) return;
+  lastUpd = u; paintUpdatePanel(u);
   const v = esc(u.version || '');
   let html = '';
   if (u.status === 'available' && updDismissed !== u.version) html = `<span>Version <b>${v}</b> is available (you have ${esc(u.current)}).</span><button data-a="go">${u.auto ? 'Update' : 'Get it'}</button><button data-a="later" class="ghost">Later</button>`;
+  else if (u.status === 'installing') html = `<span>Installing version ${v}…</span>`;
   else if (u.status === 'downloading') html = `<span>Downloading version ${v}… ${u.pct || 0}%</span>`;
   else if (u.status === 'ready') html = `<span>Version ${v} is ready.</span><button data-a="restart">Restart to update</button><button data-a="later" class="ghost">Later</button>`;
   else if (u.status === 'error' && u.manual) html = `<span>Update problem: ${esc(u.error || '')}</span><button data-a="later" class="ghost">Dismiss</button>`;
