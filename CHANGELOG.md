@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.5.5
+
+- The extra buttons (theater, captions, sleep, quality, ⋮) now sit on the same row as play, volume and full screen, instead of down on the timeline. The browser's own second ⋮ is hidden, so there is only one. They also stay up while the video is paused, like the rest of the bar.
+- Starting a video no longer marks it watched. It keeps its red progress bar in Subscriptions and everywhere else, and counts as watched (and drops out of "hide watched") once you pass 90%. Videos already marked watched stay that way; use "Mark as unwatched" on them.
+
+## 0.5.4
+
+- Fixed buttons in the video's bottom bar, just left of the ⋮: theater mode (lit while on), captions, sleep timer (shows minutes left) and quality (shows the current choice). Captions, sleep and quality open their list right above the bar. Settings, Layout lets you turn each one off, and add a speed button.
+
+## 0.5.3
+
+- Two-finger trackpad swipe goes back and forward in the app: swipe right for back, left for forward. Settings, General, Trackpad: turn it off, set how far you have to swipe, or reverse the direction. It steps aside over anything that scrolls sideways.
+
+## 0.5.2
+
+- The ⋮ actions button now sits in the video's bottom control bar, where the browser's own ⋮ used to be (that one is emptied, so there is only one). Its menu opens upward from there. Picture in picture still works from the menu.
+- Full screen from the control bar now keeps the ⋮ button and menu.
+
+## 0.5.1
+
+- Comments placement: below the video (as before), in the side column where live chat sits, or in the side column except in theater mode, where they drop back below the video. Pick it in Settings, Comments, or flip it with the new button in the comments header.
+- Side panel height is adjustable (Settings, Comments). The comments scroll inside it and the header stays put. Works with related videos on the side, below, or hidden.
+
+## 0.5.0
+
+- Comments: the real total in the title, "Show more comments" paging, replies you can expand and page through, creator / pinned / member / creator-liked badges, a search box over the loaded comments, and Like and Reply buttons (signed in).
+- New Settings tab, Comments. Viewing: load automatically or on click, default sort, text size, spacing, how many lines before "Read more", and whether to show avatars, like counts, badges and the action buttons. Hiding: words or names to hide, and hide comments with links. Writing: a one-line box that opens when clicked (or always open, or hidden), send with Ctrl+Enter, Enter or the button, ask before posting, per-video drafts, a character counter, and what to show after you post.
+- Comment box keeps what you typed when you change its style.
+- Reply fetching works with YouTube's current comment format (the library's own helper does not).
+
+## 0.4.4
+
+- End screen grid is adjustable: one row of three (like YouTube's own), 2 x 2, 3 x 3 or 4 x 4. Switch it right on the end screen, or in Settings, Playback. Cards are sized to fit the player, so bigger players (theater mode, full screen) get bigger thumbnails.
+
+## 0.4.3
+
+- End screen: when a video finishes, a grid of suggested videos appears over the player with Replay and Close buttons. Your queue comes first, then the rest of the playlist you came from, then related videos.
+- With autoplay on, an "Up next in N seconds" countdown runs with a Cancel button, so the grid is never skipped past. With autoplay off, the grid just stays.
+- Settings, Playback: turn the end screen off, or change the countdown (3 to 20 seconds).
+
+## 0.4.2
+
+- The three-dot (⋮) button on the video now holds every action that used to sit in the row under it: loop, theater mode, picture in picture, mini player, save to Watch later or a playlist, download (with presets), audio only, copy link, copy link at the current time, open on youtube.com and next video. Quality, speed, subtitles, sleep timer and buffer are below them.
+- "Customize this menu" in the menu chooses which actions show.
+- The row under the video is hidden by default; Settings, Layout can bring it back.
+- A small yellow dot on the ⋮ button shows that a sleep timer is running.
+
+## 0.4.1
+
+- Playlist pages follow the desktop layout: a gradient card with the cover, title, owner, description, view count and Play all, Save, Share and More buttons, beside a list of videos with the channel, views and date, a three-dot menu, and Watch later / Add to queue buttons on hover. Watch later uses the same page.
+- Watch history follows the desktop layout: filter chips (All, Videos, Shorts), day headings, large rows, and a side panel with search, clear, pause and manage links. Videos you watch in the app are grouped by day; your YouTube history appears in its own section because YouTube gives no dates for it.
+- "Pause watch history" stops the app recording what you watch (also in Settings).
+- Playlist videos now show their channel, views, date and channel link.
+- "Save playlist" keeps a playlist in the app; saved playlists appear on the Playlists page.
+
+## 0.4.0
+
+- Three-dot menu on every video (grids, lists, playlists, related videos): play, play next, add to queue, save to Watch later or a playlist, mark watched, video details, downloads, copy link, go to channel, subscribe.
+- Video details: search results and history show each video as a row with its views, date, channel (with avatar and verified tick), description and badges. The "Video details" panel shows the full description, likes and dislikes, duration and tags.
+- Search results can be shown as a list (default) or a grid, with a switch above the results and a setting.
+- Back and forward buttons in the header, the mouse back/forward buttons, and Alt+Left / Alt+Right. Each page remembers its scroll position.
+- Up next: an autoplay switch and a play queue next to the video.
+- Chapters from the description, with the current chapter shown and click to jump.
+- Search history in the search box, with removable entries.
+- More keyboard shortcuts (C subtitles, 0-9 seek, Home/End, frame step, Shift+N / Shift+P, I mini player) and a shortcut sheet on ?.
+- The volume and mute state are remembered between sessions.
+- Fix: after changing any setting, the app forgot the defaults of settings you had not touched (for example it could start showing Shorts again).
+- History and Watch later are shown as lists.
+
 ## 0.3.0
 
 - Channel pages now work like the desktop site: banner, avatar, handle, subscriber and video counts, and tabs for Home (the channel's own shelves), Videos, Shorts, Live, Playlists and About (description, stats, links). Videos, Shorts and Live can be sorted Latest, Popular or Oldest, and load more as you scroll.

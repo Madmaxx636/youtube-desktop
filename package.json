@@ -1,6 +1,6 @@
 {
   "name": "youtube-desktop",
-  "version": "0.3.0",
+  "version": "0.5.5",
   "description": "A feature-rich desktop YouTube client",
   "main": "main.js",
   "scripts": {

@@ -167,6 +167,9 @@ function mapVideo(v) {
     duration: txt(v.duration) || v.length_text?.text || '',
     thumb: thumb(v.thumbnails) || (Array.isArray(v.thumbnail) ? thumb(v.thumbnail) : '') || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
     isShort: v.type === 'ShortsLockupView' || v.type === 'ReelItem',
+    snippet: txt(v.description_snippet) || (v.snippets || []).map((s) => txt(s.text)).join(' '),
+    badges: [v.is_live || v.is_upcoming ? (v.is_live ? 'LIVE' : 'UPCOMING') : '', ...(v.badges || []).map((b) => b.label || txt(b.text) || '')].filter(Boolean).slice(0, 4),
+    verified: !!v.author?.is_verified,
     watchedPct: Number((v.thumbnail_overlays || []).find((o) => o.type === 'ThumbnailOverlayResumePlayback')?.percent_duration_watched) || 0,
   };
 }
@@ -192,8 +195,10 @@ function collectVideos(nodes, out = []) {
       try {
         for (const o of n.content_image?.overlays || []) for (const b of o.badges || []) if (/^\d+:\d{2}/.test(txt(b.text))) duration = txt(b.text);
       } catch {}
+      let channelId = '';
+      try { channelId = /UC[\w-]{22}/.exec(JSON.stringify(meta?.metadata || {}))?.[0] || ''; } catch {}
       out.push({
-        id, title: txt(meta?.title), channel, channelId: '', channelThumb: '',
+        id, title: txt(meta?.title), channel, channelId, channelThumb: fixUrl(meta?.image?.avatar?.image?.[0]?.url),
         views, published, duration, thumb: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, isShort: false,
       });
     } else {
@@ -455,6 +460,22 @@ function mapChannelNode(n) {
   };
 }
 
+// ---------- comment helpers ----------
+const commentThreads = new Map(), commentViews = new Map(), commentFeeds = new Map(), replyMore = new Map();
+const capMap = (map, n) => { while (map.size > n) map.delete(map.keys().next().value); };
+function mapComment(cm, level = 0) {
+  if (!cm || !cm.comment_id) return null;
+  commentViews.set(cm.comment_id, cm); capMap(commentViews, 900);
+  const likes = String(cm.like_count ?? '');
+  return {
+    id: cm.comment_id, author: txt(cm.author?.name), authorId: cm.author?.id || '',
+    avatar: fixUrl(cm.author?.thumbnails?.[0]?.url || cm.author?.avatar_thumbnail_url || ''),
+    text: txt(cm.content), likes: likes && likes !== '0' ? likes : '', liked: !!cm.is_liked,
+    published: typeof cm.published_time === 'string' ? cm.published_time : txt(cm.published_time),
+    isOwner: !!cm.author_is_channel_owner, pinned: !!cm.is_pinned, hearted: !!cm.is_hearted, member: !!cm.is_member, level,
+  };
+}
+
 const handlers = {
   async 'yt:home'(seeds) {
     // Signed in: your real recommendations from the TV home page.
@@ -500,15 +521,52 @@ const handlers = {
       related,
     };
   },
-  async 'yt:comments'(id, sort) {
-    const i = await innertube();
-    const c = await i.getComments(id, sort === 'NEWEST_FIRST' ? 'NEWEST_FIRST' : 'TOP_COMMENTS');
-    return (c.contents || []).map((t) => {
-      const cm = t.comment;
-      return cm && { author: txt(cm.author?.name), text: txt(cm.content), likes: txt(cm.like_count), published: txt(cm.published_time), thumb: thumb(cm.author?.thumbnails) };
+  // ----- comments: pages, replies, and (signed in) reply / like -----
+  async 'yt:comments'(id, sort, cont) {
+    let feed, first = false;
+    if (cont) {
+      const prev = commentFeeds.get(cont); if (!prev) throw new Error('That list expired. Reload the comments.');
+      commentFeeds.delete(cont); feed = await prev.getContinuation();
+    } else {
+      feed = await (await innertube()).getComments(id, sort === 'NEWEST_FIRST' ? 'NEWEST_FIRST' : 'TOP_COMMENTS'); first = true;
+    }
+    let more = null;
+    if (feed.has_continuation) { more = crypto.randomBytes(6).toString('hex'); commentFeeds.set(more, feed); capMap(commentFeeds, 30); }
+    const comments = (feed.contents || []).map((th) => {
+      const c = mapComment(th.comment); if (!c) return null;
+      c.hasReplies = !!th.has_replies; c.replies = String(th.comment?.reply_count || '');
+      commentThreads.set(c.id, th); capMap(commentThreads, 400);
+      return c;
     }).filter(Boolean);
+    return { comments, more: !!more && more, total: first ? txt(feed.header?.comments_count) : undefined };
   },
-  // ----- channel pages (desktop layout: header, tabs, shelves, sorting, paging) -----
+  async 'yt:replies'(commentId, more) {
+    // This comment format returns reply items directly (the library's own helper expects threads), so fetch them here.
+    const th = commentThreads.get(commentId); if (!th) throw new Error('Reload the comments to see replies.');
+    let endpoint;
+    if (more) { endpoint = replyMore.get(commentId); if (!endpoint) throw new Error('There are no more replies.'); }
+    else { endpoint = th.comment_replies_data?.contents?.[0]?.endpoint; if (!endpoint) throw new Error('This comment has no replies.'); }
+    const resp = await endpoint.call((await innertube()).actions, { parse: true });
+    const found = []; let next = null;
+    for (const act of resp.on_response_received_endpoints || []) {
+      for (const n of act.contents || []) {
+        if (n.type === 'CommentView') found.push(n);
+        else if (n.type === 'CommentThread' && n.comment) found.push(n.comment);
+        else if (n.type === 'ContinuationItem') next = n.button?.endpoint || n.endpoint;
+      }
+    }
+    if (next) replyMore.set(commentId, next); else replyMore.delete(commentId);
+    return { replies: found.map((c) => mapComment(c, 1)).filter(Boolean), more: !!next };
+  },
+  async 'me:commentReply'(commentId, text) {
+    const cm = commentViews.get(commentId); if (!cm) throw new Error('Reload the comments and try again.');
+    if (!String(text).trim()) throw new Error('Reply is empty.');
+    cm.setActions((await authed()).actions); await cm.reply(String(text)); return true;
+  },
+  async 'me:commentLike'(commentId, on) {
+    const cm = commentViews.get(commentId); if (!cm) throw new Error('Reload the comments and try again.');
+    cm.setActions((await authed()).actions); if (on) await cm.like(); else await cm.unlike(); return true;
+  },
   async 'yt:channelInfo'(id) {
     const ch = await getChannel(id);
     const hc = ch.header?.content;
@@ -684,9 +742,13 @@ const handlers = {
     try { pl = await i.getPlaylist(id); }
     catch (e) { if (acc.read().active) return privatePlaylist(id); throw e; }
     const info = pl.info || {};
-    let vids = (pl.videos || []).map(mapVideo).filter(Boolean);
-    for (let n = 0; n < 20 && pl.has_continuation; n++) { pl = await pl.getContinuation(); vids = vids.concat((pl.videos || []).map(mapVideo).filter(Boolean)); }
-    return { id, title: txt(info.title), author: txt(info.author?.name), total: txt(info.total_items) || String(vids.length), videos: vids };
+    let vids = collectVideos(pl.videos || []);
+    for (let n = 0; n < 20 && pl.has_continuation; n++) { pl = await pl.getContinuation(); vids = vids.concat(collectVideos(pl.videos || [])); }
+    return {
+      id, title: txt(info.title), author: txt(info.author?.name), authorId: info.author?.id || '', authorThumb: thumb(info.author?.thumbnails),
+      description: txt(info.description), views: txt(info.views), updated: txt(info.last_updated),
+      cover: thumb(info.thumbnails), total: txt(info.total_items) || String(vids.length), videos: vids,
+    };
   },
   async 'yt:subs-list'(id) {
     const d = JSON.parse(await ytdlp(['-J', '--skip-download', '--no-playlist', `https://www.youtube.com/watch?v=${id}`]));

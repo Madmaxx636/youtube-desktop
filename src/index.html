@@ -11,6 +11,7 @@
 <body>
 <header id="top">
   <button id="menu-btn" title="Menu"><i data-ic="menu"></i></button>
+  <div id="nav-btns"><button id="nav-back" title="Back (Alt+Left)" disabled><i data-ic="chevleft"></i></button><button id="nav-fwd" title="Forward (Alt+Right)" disabled><i data-ic="chevright"></i></button></div>
   <div id="logo" title="Home"><span class="logo-mark">▶</span><span class="logo-text">You<span class="tube">Tube</span></span></div>
   <div id="search-wrap">
     <input id="search" placeholder="Search" autocomplete="off">
@@ -35,10 +36,12 @@
   <section id="watch" hidden>
     <div id="player-area">
       <div id="player-box">
-        <video id="video" controls autoplay></video>
+        <video id="video" controls controlsList="nodownload noplaybackrate noremoteplayback" disablepictureinpicture autoplay></video>
         <div id="sb-toast" hidden></div>
-        <button id="p-gear" class="p-gear" title="Player settings"><i data-ic="sliders"></i></button>
+        <div id="p-quick"></div>
+        <button id="p-gear" class="p-gear" title="More: actions, quality, speed, subtitles"><i data-ic="dots"></i></button>
         <div id="p-menu" class="p-menu" hidden></div>
+        <div id="end-screen" hidden></div>
       </div>
       <div id="toolbar-wrap">
         <div id="player-tools"></div>
@@ -54,6 +57,7 @@
         <button id="w-sub">Subscribe</button>
         <span id="rate" class="chip"><button id="r-like" title="Like"><i data-ic="up"></i><span id="r-likes"></span></button><button id="r-dislike" title="Dislike"><i data-ic="down"></i><span id="r-dislikes"></span></button></span>
       </div>
+      <div id="w-chapters" class="box" hidden></div>
       <div id="w-desc" class="box collapsed">
         <div id="w-stats"></div>
         <div id="w-desc-text"></div>
@@ -62,16 +66,21 @@
       <section id="comments-box" class="box">
         <header>
           <h3 id="c-title">Comments</h3>
+          <label class="c-find" title="Search the comments loaded so far"><i data-ic="search"></i><input id="c-find" placeholder="Search comments" spellcheck="false"></label>
           <select id="c-sort" title="Sort comments"><option value="TOP_COMMENTS">Top</option><option value="NEWEST_FIRST">Newest</option></select>
+          <button id="c-place" class="link" title="Move the comments to the side, or back below the video"></button>
           <button id="c-toggle" class="link">Hide</button>
         </header>
-        <div id="c-compose"><textarea id="c-input" rows="2" placeholder="Add a comment…"></textarea><button id="c-post">Comment</button></div>
+        <div id="c-compose"></div>
+        <div id="c-note"></div>
         <div id="c-list"></div>
+        <div id="c-more"></div>
       </section>
     </div>
-    <aside id="related"></aside>
+    <aside id="right-col"><div id="side-comments"></div><div id="related"></div></aside>
   </section>
 </div>
+<div id="gtoast" hidden></div>
 <div id="acct-menu" class="popover" hidden></div>
 <div id="login" class="overlay" hidden>
   <div class="panel">

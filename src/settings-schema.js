@@ -9,8 +9,9 @@ const SB_CATS = [['sponsor', 'Sponsor'], ['selfpromo', 'Self promotion'], ['inte
 
 const SCHEMA = {
   defaults: {
-    startPage: 'home', hideShorts: true, closeToTray: false, windowSystem: 'auto',
-    autoplayNext: true, resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
+    startPage: 'home', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
+    commentsPlace: 'below', commentsSideHeight: 75, commentsAuto: true, commentsSortDefault: 'TOP_COMMENTS', commentsSize: 100, commentsDensity: 'comfortable', commentsLines: '5', commentsAvatars: true, commentsLikes: true, commentsBadges: true, commentsActions: true, commentsBlock: '', commentsHideLinks: false, composerStyle: 'expand', composerSubmit: 'ctrl', composerConfirm: true, composerDrafts: true, composerCounter: true, afterPost: 'newest',
+    autoplayNext: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
     quality: 'auto', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
     dlContainer: 'mp4', dlMaxHeight: '1080', dlCodec: 'auto', dlFps: '0', dlAudioFormat: 'mp3', dlAudioQuality: '0',
     dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
@@ -18,14 +19,19 @@ const SCHEMA = {
     subDefaultOn: false, subLang: 'en', subAllowAuto: true, subSize: 100, subFont: 'sans', subColor: '#ffffff', subBg: '#000000', subBgOpacity: 75, subEdge: 'none',
     miniSize: 'medium', miniCorner: 'bottom-right', miniOnTop: true, miniOpacity: 100, miniFrameless: true, miniOnMinimize: false, miniMargin: 16,
     skin: 'modern', theme: 'dark', accent: '#ff0000', cBg: '#0f0f0f', cSurface: '#272727', cText: '#f1f1f1', cLink: '#3ea6ff', uiScalePct: 100, fontSize: 14, iconSize: 20, density: 'comfortable', css: '',
-    gridSize: 300, sidebarDefault: true, sidebarWidth: 200, sidebarAutoHide: 'never', relatedWidth: 400, toolbarSize: 40, toolLabels: false, nav_home: true, nav_subs: true, nav_playlists: true, nav_history: true, nav_watchlater: true, nav_downloads: true,
+    gridSize: 300, sidebarDefault: true, sidebarWidth: 200, sidebarAutoHide: 'never', relatedWidth: 400, toolbarSize: 40, toolLabels: false, showToolbar: false, pbTheater: true, pbCaptions: true, pbSleep: true, pbQuality: true, pbSpeed: false, menuActions: null, nav_home: true, nav_subs: true, nav_playlists: true, nav_history: true, nav_watchlater: true, nav_downloads: true,
     watchRelated: 'side', theater: false, commentsHidden: false, descExpanded: false, showDislikes: true,
     subsView: 'grouped', subsGroupBy: 'date', subsHideWatched: true, subsSort: 'new', subsLayout: 'list',
     sponsorblock: true, sbc_sponsor: true, sbc_selfpromo: true, sbc_interaction: true, sbc_intro: true, sbc_outro: true, sbc_preview: false, sbc_music_offtopic: false, sbc_filler: false,
-    dearrow: true, ryd: true,
+    dearrow: true, ryd: true, pauseHistory: false,
   },
   tabs: [
     { id: 'general', label: 'General', groups: [
+      { title: 'Trackpad', items: [
+        { key: 'swipeNav', type: 'toggle', label: 'Two-finger swipe goes back and forward', hint: 'Swipe right to go back, left to go forward, like in a browser.' },
+        { key: 'swipeDistance', type: 'range', label: 'Swipe distance needed', min: 60, max: 400, step: 10, unit: ' px', when: (s) => s.swipeNav },
+        { key: 'swipeInvert', type: 'toggle', label: 'Reverse the swipe direction', when: (s) => s.swipeNav },
+      ] },
       { title: 'Startup', items: [
         { key: 'startPage', type: 'select', label: 'Open on', options: opt(['home', 'Home'], ['subs', 'Subscriptions'], ['playlists', 'Playlists'], ['history', 'History']) },
         { key: 'closeToTray', type: 'toggle', label: 'Keep running in the tray when the window is closed' },
@@ -40,7 +46,11 @@ const SCHEMA = {
     { id: 'playback', label: 'Playback', groups: [
       { title: 'Behavior', items: [
         { key: 'autoplayNext', type: 'toggle', label: 'Play the next video automatically' },
+        { key: 'endScreen', type: 'toggle', label: 'Show suggested videos when a video ends', hint: 'With autoplay on, a short countdown runs that you can cancel.' },
+        { key: 'endGrid', type: 'select', label: 'Suggestions on the end screen', options: opt(['3x1', 'One row of 3 (like YouTube)'], ['2x2', '2 × 2'], ['3x3', '3 × 3'], ['4x4', '4 × 4']), hint: 'You can also switch on the end screen itself.', when: (s) => s.endScreen !== false },
+        { key: 'autoplayDelay', type: 'select', label: 'Countdown before the next video', options: opt(['3', '3 seconds'], ['5', '5 seconds'], ['8', '8 seconds'], ['12', '12 seconds'], ['20', '20 seconds']), when: (s) => s.endScreen !== false && s.autoplayNext !== false },
         { key: 'resume', type: 'toggle', label: 'Resume where I left off' },
+        { key: 'rememberVolume', type: 'toggle', label: 'Remember my volume and mute between sessions' },
         { key: 'rememberSpeed', type: 'toggle', label: 'Remember the speed I last used' },
         { key: 'defaultSpeed', type: 'select', label: 'Default speed', options: opt('0.5', '0.75', '1', '1.25', '1.5', '1.75', '2'), when: (s) => !s.rememberSpeed },
         { key: 'defaultVolume', type: 'range', label: 'Starting volume', min: 0, max: 100, step: 5, unit: '%' },
@@ -143,7 +153,8 @@ const SCHEMA = {
       { title: 'Custom CSS', items: [{ key: 'css', type: 'textarea', label: 'Your own styles' }] },
     ] },
     { id: 'layout', label: 'Layout', groups: [
-      { title: 'Video grid', items: [{ key: 'gridSize', type: 'range', label: 'Thumbnail size', min: 200, max: 460, step: 20, unit: ' px' }] },
+      { title: 'Video grid', items: [
+        { key: 'searchView', type: 'select', label: 'Search results', options: opt(['list', 'List (with descriptions)'], ['grid', 'Grid']), hint: 'You can also switch with the buttons above the results.' },{ key: 'gridSize', type: 'range', label: 'Thumbnail size', min: 200, max: 460, step: 20, unit: ' px' }] },
       { title: 'Sidebar', items: [
         { key: 'sidebarDefault', type: 'toggle', label: 'Show the sidebar' },
         { key: 'sidebarWidth', type: 'range', label: 'Sidebar width (you can also drag its edge)', min: 150, max: 420, step: 5, unit: ' px' },
@@ -154,15 +165,21 @@ const SCHEMA = {
       ] },
       { title: 'Watch page', items: [
         { key: 'theater', type: 'toggle', label: 'Theater mode (wide player)' },
-        { key: 'toolbarSize', type: 'range', label: 'Player button size', min: 28, max: 64, step: 2, unit: ' px' },
-        { key: 'toolLabels', type: 'toggle', label: 'Show text labels on player buttons' },
+        { key: 'pbTheater', type: 'toggle', label: 'Video bar: theater mode button' },
+        { key: 'pbCaptions', type: 'toggle', label: 'Video bar: captions button' },
+        { key: 'pbSleep', type: 'toggle', label: 'Video bar: sleep timer button' },
+        { key: 'pbQuality', type: 'toggle', label: 'Video bar: quality button' },
+        { key: 'pbSpeed', type: 'toggle', label: 'Video bar: speed button' },
+        { key: 'showToolbar', type: 'toggle', label: 'Also show the button row under the video', hint: 'All actions are in the ⋮ menu on the video. Turn this on to keep them below the video as well.' },
+        { key: 'toolbarSize', type: 'range', label: 'Under-video button size', min: 28, max: 64, step: 2, unit: ' px', when: (s) => s.showToolbar },
+        { key: 'toolLabels', type: 'toggle', label: 'Show text labels on those buttons', when: (s) => s.showToolbar },
         { key: 'relatedWidth', type: 'range', label: 'Related videos column width', min: 280, max: 600, step: 10, unit: ' px', when: (s) => s.watchRelated === 'side' },
         { key: 'watchRelated', type: 'select', label: 'Related videos', options: opt(['side', 'Beside the video'], ['below', 'Below'], ['hidden', 'Hidden']) },
         { key: 'descExpanded', type: 'toggle', label: 'Show the full description by default' },
         { key: 'commentsHidden', type: 'toggle', label: 'Hide comments' },
         { key: 'showDislikes', type: 'toggle', label: 'Show dislike counts' },
-        { type: 'info', text: 'Player buttons: use Customize under the video to add, remove or reorder them. Quality, speed and subtitles are in the slider menu on the video.' },
-        { type: 'button', label: 'Reset player buttons', action: 'resetToolbar' },
+        { type: 'info', text: 'The ⋮ menu on the video holds every action, plus quality, speed, subtitles, sleep timer and buffer. Use “Customize this menu” inside it to choose what it shows.' },
+        { type: 'button', label: 'Reset the video menu and buttons', action: 'resetToolbar' },
       ] },
     ] },
     { id: 'subs', label: 'Subscriptions', groups: [
@@ -175,6 +192,35 @@ const SCHEMA = {
       ] },
       { title: 'Import', items: [{ type: 'file', label: 'Import subscriptions (Google Takeout subscriptions.csv)', accept: '.csv', action: 'importSubs' }] },
     ] },
+    { id: 'comments', label: 'Comments', groups: [
+      { title: 'Where the comments go', items: [
+        { key: 'commentsPlace', type: 'select', label: 'Placement', options: opt(['below', 'Below the video (the original place)'], ['side', 'In the side column, where live chat would be'], ['side-normal', 'In the side column, but below the video in theater mode']), hint: 'You can also flip it with the button on the comments header.' },
+        { key: 'commentsSideHeight', type: 'range', label: 'Side panel height', min: 40, max: 95, step: 5, unit: '% of the window', when: (s) => s.commentsPlace === 'side' || s.commentsPlace === 'side-normal' },
+      ] },
+      { title: 'Viewing', items: [
+        { key: 'commentsAuto', type: 'toggle', label: 'Load comments automatically', hint: 'Off shows a “Show comments” button instead, which saves data.' },
+        { key: 'commentsSortDefault', type: 'select', label: 'Sort comments by', options: opt(['TOP_COMMENTS', 'Top'], ['NEWEST_FIRST', 'Newest first']) },
+        { key: 'commentsSize', type: 'range', label: 'Text size', min: 85, max: 140, step: 5, unit: '%' },
+        { key: 'commentsDensity', type: 'select', label: 'Spacing', options: opt(['comfortable', 'Comfortable'], ['compact', 'Compact']) },
+        { key: 'commentsLines', type: 'select', label: 'Collapse long comments after', options: opt(['3', '3 lines'], ['5', '5 lines'], ['8', '8 lines'], ['12', '12 lines'], ['0', 'Never']) },
+        { key: 'commentsAvatars', type: 'toggle', label: 'Show profile pictures' },
+        { key: 'commentsLikes', type: 'toggle', label: 'Show like counts' },
+        { key: 'commentsBadges', type: 'toggle', label: 'Show creator, pinned, member and creator-liked badges' },
+        { key: 'commentsActions', type: 'toggle', label: 'Show Like and Reply buttons', hint: 'Liking and replying need you to be signed in.' },
+      ] },
+      { title: 'Hide comments', items: [
+        { key: 'commentsBlock', type: 'textarea', label: 'Words or names to hide (one per line)', hint: 'Matches the comment text and the author name, ignoring case.' },
+        { key: 'commentsHideLinks', type: 'toggle', label: 'Hide comments that contain links' },
+      ] },
+      { title: 'Writing a comment', items: [
+        { key: 'composerStyle', type: 'select', label: 'Comment box', options: opt(['expand', 'One line, opens when clicked (like YouTube)'], ['full', 'Always open'], ['hidden', 'Hidden']) },
+        { key: 'composerSubmit', type: 'select', label: 'Send with', options: opt(['ctrl', 'Ctrl + Enter'], ['enter', 'Enter (Shift + Enter for a new line)'], ['button', 'The button only']) },
+        { key: 'composerConfirm', type: 'toggle', label: 'Ask before posting', hint: 'Comments are public, so this is on by default.' },
+        { key: 'composerDrafts', type: 'toggle', label: 'Keep a draft for each video until I post it' },
+        { key: 'composerCounter', type: 'toggle', label: 'Show a character counter' },
+        { key: 'afterPost', type: 'select', label: 'After I post', options: opt(['newest', 'Show newest comments so I can see mine'], ['keep', 'Keep the current sorting']) },
+      ] },
+    ] },
     { id: 'integrations', label: 'Integrations', groups: [
       { title: 'SponsorBlock', items: [
         { key: 'sponsorblock', type: 'toggle', label: 'Skip community-marked segments while playing' },
@@ -185,6 +231,7 @@ const SCHEMA = {
         { key: 'ryd', type: 'toggle', label: 'Return YouTube Dislike: show dislike counts' },
       ] },
       { title: 'Local data', items: [
+        { key: 'pauseHistory', type: 'toggle', label: 'Pause watch history', hint: 'Stops recording what you watch in this app. Your YouTube history is not affected.' },
         { type: 'button', label: 'Clear watch history and progress', action: 'clearHistory', danger: true },
         { type: 'button', label: 'Clear local subscriptions', action: 'clearSubs', danger: true },
       ] },
