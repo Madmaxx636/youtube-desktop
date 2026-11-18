@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.1
+
+- New default player look, "Modern", matching YouTube's current bar: a thin full-width timeline with a blue dot, play and volume on the left with the time in a rounded pill, and on the right an autoplay switch, theater, captions, sleep timer, a quality gear that shows HD / 2K / 4K for the current stream, the ⋮ menu and full screen. Round, larger icons.
+- The autoplay switch in the bar turns Autoplay on or off (and can be hidden in Settings, Appearance). The buttons now default to the right side; "Next to the volume" is still a choice.
+- The earlier "YouTube" red look is still available as a theme.
+
+
+## 0.6.0
+
+- The video now has its own control bar instead of the browser's: play, volume (slides out on hover), the theater / captions / sleep / quality buttons right next to the volume, the time, ⋮, and full screen. Seek bar shows buffered video, SponsorBlock segments and chapter breaks, with a time and chapter tooltip when you hover. Click the picture to pause, double-click for full screen. The bar fades away while the video plays and comes back when you move the mouse.
+- Player themes (Settings, Appearance): YouTube, Classic, Glass, Minimal, AMOLED black and Light, plus your own accent color. The theater / captions / sleep / quality buttons can sit next to the volume or next to full screen.
+- Going back or forward (buttons, Alt+arrows, trackpad swipe) animates the page: slide, fade or none (Settings, Appearance).
+- New option: stop fading out watched videos. With "Fade out videos I have watched" off, they show normally with just the red progress bar (a full bar if you marked it watched by hand).
+- Captions lift above the bar while it is showing.
+
+
+## 0.5.6
+
+- The YouTube logo can go to Home, Subscriptions, Playlists or History. Pick it in Settings, General ("The YouTube logo goes to"). The tooltip follows your choice.
+
 ## 0.5.5
 
 - The extra buttons (theater, captions, sleep, quality, ⋮) now sit on the same row as play, volume and full screen, instead of down on the timeline. The browser's own second ⋮ is hidden, so there is only one. They also stay up while the video is paused, like the rest of the bar.

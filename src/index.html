@@ -36,10 +36,21 @@
   <section id="watch" hidden>
     <div id="player-area">
       <div id="player-box">
-        <video id="video" controls controlsList="nodownload noplaybackrate noremoteplayback" disablepictureinpicture autoplay></video>
+        <video id="video" autoplay></video>
         <div id="sb-toast" hidden></div>
-        <div id="p-quick"></div>
-        <button id="p-gear" class="p-gear" title="More: actions, quality, speed, subtitles"><i data-ic="dots"></i></button>
+        <div id="pbar">
+          <div id="pseek"><div class="pt"><div class="pbuf"></div><div class="pplay"></div><div class="pmarks"></div></div><div class="pknob"></div><div id="ptip" hidden></div></div>
+          <div class="prow">
+            <button id="pc-play" class="pc" title="Play / pause (K)" tabindex="-1"></button>
+            <div class="pvol"><button id="pc-mute" class="pc" title="Mute (M)" tabindex="-1"></button><input id="pc-vol" type="range" min="0" max="1" step="0.02" tabindex="-1"></div>
+            <div id="p-quick"></div>
+            <span id="pc-time"></span>
+            <span class="grow"></span>
+            <button id="pc-auto" class="pc" title="Autoplay" tabindex="-1"><span class="sw"><span class="kn"></span></span></button>
+            <button id="p-gear" class="p-gear" title="More: actions, quality, speed, subtitles" tabindex="-1"><i data-ic="dots"></i></button>
+            <button id="pc-fs" class="pc" title="Full screen (F)" tabindex="-1"></button>
+          </div>
+        </div>
         <div id="p-menu" class="p-menu" hidden></div>
         <div id="end-screen" hidden></div>
       </div>

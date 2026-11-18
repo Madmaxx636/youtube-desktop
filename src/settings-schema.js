@@ -9,7 +9,7 @@ const SB_CATS = [['sponsor', 'Sponsor'], ['selfpromo', 'Self promotion'], ['inte
 
 const SCHEMA = {
   defaults: {
-    startPage: 'home', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
+    startPage: 'home', logoGoes: 'home', playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
     commentsPlace: 'below', commentsSideHeight: 75, commentsAuto: true, commentsSortDefault: 'TOP_COMMENTS', commentsSize: 100, commentsDensity: 'comfortable', commentsLines: '5', commentsAvatars: true, commentsLikes: true, commentsBadges: true, commentsActions: true, commentsBlock: '', commentsHideLinks: false, composerStyle: 'expand', composerSubmit: 'ctrl', composerConfirm: true, composerDrafts: true, composerCounter: true, afterPost: 'newest',
     autoplayNext: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
     quality: 'auto', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
@@ -34,6 +34,7 @@ const SCHEMA = {
       ] },
       { title: 'Startup', items: [
         { key: 'startPage', type: 'select', label: 'Open on', options: opt(['home', 'Home'], ['subs', 'Subscriptions'], ['playlists', 'Playlists'], ['history', 'History']) },
+        { key: 'logoGoes', type: 'select', label: 'The YouTube logo goes to', options: opt(['home', 'Home'], ['subs', 'Subscriptions'], ['playlists', 'Playlists'], ['history', 'History']) },
         { key: 'closeToTray', type: 'toggle', label: 'Keep running in the tray when the window is closed' },
         { key: 'hideShorts', type: 'toggle', label: 'Hide Shorts' },
       ] },
@@ -135,6 +136,17 @@ const SCHEMA = {
       { title: 'Automatic', items: [{ key: 'miniOnMinimize', type: 'toggle', label: 'Open the mini player when I minimize the window while a video is playing' }] },
     ] },
     { id: 'appearance', label: 'Appearance', groups: [
+      { title: 'Video player', items: [
+        { key: 'playerTheme', type: 'select', label: 'Player theme', options: opt(['modern', 'Modern (like YouTube today, blue)'], ['youtube', 'YouTube (dark fade, red)'], ['classic', 'Classic (solid bar, blue)'], ['glass', 'Glass (floating, blurred)'], ['minimal', 'Minimal (thin line)'], ['amoled', 'AMOLED black (green)'], ['light', 'Light (white bar)']) },
+        { key: 'playerAccentOn', type: 'toggle', label: 'Use my own accent color for the player' },
+        { key: 'playerAccent', type: 'color', label: 'Player accent color', when: (s) => s.playerAccentOn },
+        { key: 'pbAutoplay', type: 'toggle', label: 'Autoplay switch in the player bar' },
+        { key: 'pbSide', type: 'select', label: 'Theater, captions, sleep and quality buttons sit', options: opt(['left', 'Next to the volume'], ['right', 'Next to full screen']) },
+      ] },
+      { title: 'Pages', items: [
+        { key: 'pageAnim', type: 'select', label: 'Animation when going back or forward', options: opt(['slide', 'Slide'], ['fade', 'Fade'], ['none', 'None']) },
+        { key: 'dimWatched', type: 'toggle', label: 'Fade out videos I have watched', hint: 'Turn off to show watched videos normally, with just the red progress bar.' },
+      ] },
       { title: 'Look', items: [
         { key: 'skin', type: 'select', label: 'Skin', options: opt(['modern', 'Modern'], ['classic', 'Classic (2012)']), hint: 'Classic uses its own light colors and ignores the theme below.' },
         { key: 'theme', type: 'select', label: 'Theme', options: THEME_LIST },

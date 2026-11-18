@@ -9,7 +9,7 @@ const lsSet = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Watch progress: what this app recorded, YouTube's own resume positions (synced when signed in), or the feed's value.
 let ytProg = lsGet('ytprogress', {});
-const progOf = (v) => Math.max(lsGet('progress', {})[v.id]?.pct || 0, ytProg[v.id] || 0, v.watchedPct || 0);
+const progOf = (v) => Math.max(lsGet('progress', {})[v.id]?.pct || 0, ytProg[v.id] || 0, v.watchedPct || 0) || (settings.dimWatched === false && isWatched(v.id) ? 100 : 0); // watched but not faded: show a full bar instead
 const fmtNum = (n) => (n == null ? '' : Intl.NumberFormat('en', { notation: 'compact' }).format(n));
 const isWatched = (id) => !!lsGet('watched', {})[id];
 function setWatched(ids, on) {
@@ -57,7 +57,8 @@ matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => set
 let lastZoom = 0;
 function applyLayout() {
   const root = document.documentElement.style;
-  applyCommentStyle(); placeComments(); renderPQuick();
+  applyCommentStyle(); placeComments(); renderPQuick(); syncLogoTitle();
+  applyPlayerTheme(); document.body.classList.toggle('no-dim', settings.dimWatched === false);
   document.body.classList.toggle('no-toolbar', settings.showToolbar !== true); // the button row under the video is optional
   root.setProperty('--card-min', (settings.gridSize || 300) + 'px');
   const [gy, gx, pad] = { compact: ['14px', '10px', '10px 16px'], comfortable: ['24px', '16px', '16px 24px'], spacious: ['34px', '22px', '20px 32px'] }[settings.density] || ['24px', '16px', '16px 24px'];
@@ -252,12 +253,22 @@ document.addEventListener('wheel', (e) => {
   swipeSum = 0; swipeLock = now + 700; // ignore the momentum tail of the same swipe
   navGo(back ? -1 : 1);
 }, { passive: true });
+function pageAnim(delta) {
+  const all = ['pa-back', 'pa-fwd', 'pa-fade'], m = settings.pageAnim || 'slide';
+  for (const el of [$('#main'), $('#watch')]) {
+    el.classList.remove(...all); clearTimeout(el._paT);
+    if (m === 'none') continue;
+    void el.offsetWidth;
+    el.classList.add(m === 'fade' ? 'pa-fade' : delta < 0 ? 'pa-back' : 'pa-fwd');
+    el._paT = setTimeout(() => el.classList.remove(...all), 400); // a hidden page never fires animationend, so use a timer
+  }
+}
 async function navGo(delta) {
   const i = navIdx + delta; if (i < 0 || i >= navStack.length || navBusy) return;
   const cur = navStack[navIdx]; if (cur) cur.scroll = scroller().scrollTop;
   navIdx = i; navBusy = true; updateNavButtons();
   const e = navStack[i];
-  try { if (e.type !== 'video' && !$('#watch').hidden) video.pause(); await runNav(e); } catch {}
+  try { if (e.type !== 'video' && !$('#watch').hidden) video.pause(); const run = runNav(e); pageAnim(delta); await run; } catch {}
   navBusy = false;
   setTimeout(() => { scroller().scrollTop = e.scroll || 0; }, 80);
 }
@@ -771,7 +782,14 @@ document.querySelectorAll('#side a').forEach((a) => (a.onclick = () => {
   document.querySelectorAll('#side a').forEach((x) => x.classList.toggle('active', x === a));
   ({ home: goHome, subs: () => showSubs(), history: showHistory, playlists: showPlaylists, watchlater: () => showList('watchlater', 'Watch later'), downloads: showDownloads })[a.dataset.nav]();
 }));
-$('#logo').onclick = goHome;
+// The YouTube logo goes to the page chosen in Settings, General (Home by default).
+$('#logo').onclick = () => {
+  const dest = settings.logoGoes || 'home';
+  if (dest === 'home') return goHome();
+  const link = document.querySelector(`#side [data-nav=${dest}]`);
+  if (link) link.click(); else goHome();
+};
+const syncLogoTitle = () => { $('#logo').title = { home: 'Home', subs: 'Subscriptions', playlists: 'Playlists', history: 'History' }[settings.logoGoes || 'home'] || 'Home'; };
 
 // ---------- subscription box (classic layout: channel list on the left, grouped uploads on the right) ----------
 const ageDays = (t) => {
@@ -1040,8 +1058,6 @@ const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 // Quality, speed and captions live in the player's own settings menu (the slider button on the video).
 const DEFAULT_TOOLBAR = ['loop', 'theater', 'pip', 'mini', 'watchlater', 'dlvideo', 'dlaudio', 'dlmenu', 'sleep', 'close'];
 const watchUrl = (t) => `https://www.youtube.com/watch?v=${current.id}${t ? '&t=' + Math.floor(video.currentTime) : ''}`;
-// The browser's own full-screen button asks for the bare video; give it the whole player so the ⋮ button and menu come along.
-video.requestFullscreen = (o) => $('#player-box').requestFullscreen(o);
 const TOOLS = {
   quality: { icon: 'sliders', label: 'Quality', select: RES, value: () => settings.quality || 'auto', change: (v) => { save({ quality: v }); if (current) loadStream(current.id, v, video.currentTime); } },
   speed: { icon: 'sliders', label: 'Speed', select: SPEEDS.map((s) => [String(s), s + 'x']), value: () => String(speed), change: (v) => setSpeed(parseFloat(v)) },
@@ -1107,7 +1123,7 @@ function makeTool(id) {
   return el;
 }
 // Fixed buttons in the video's bottom bar, left of the ⋮: theater, captions, sleep timer, quality (each can be turned off in Settings).
-const PQ = [['pbTheater', 'theater', 'theater', 'Theater mode (T)'], ['pbCaptions', 'captions', 'cc', 'Captions'], ['pbSleep', 'sleep', 'moon', 'Sleep timer'], ['pbQuality', 'quality', 'sliders', 'Quality'], ['pbSpeed', 'speed', 'forward', 'Speed']];
+const PQ = [['pbTheater', 'theater', 'theater', 'Theater mode (T)'], ['pbCaptions', 'captions', 'cc', 'Captions'], ['pbSleep', 'sleep', 'moon', 'Sleep timer'], ['pbQuality', 'quality', 'gear', 'Quality'], ['pbSpeed', 'speed', 'forward', 'Speed']];
 function renderPQuick() {
   const box = $('#p-quick'); if (!box) return;
   const items = PQ.filter(([k]) => settings[k]);
@@ -1116,7 +1132,7 @@ function renderPQuick() {
     const b = document.createElement('button'); b.className = 'pq'; b.title = title;
     const on = page === 'theater' ? !!settings.theater : page === 'captions' ? !!capLang : page === 'sleep' ? (!!sleepEnd || sleepEnding) : false;
     if (on) b.classList.add('on');
-    b.innerHTML = ic(icon) + (page === 'sleep' && sleepEnd ? `<span class="pqb">${Math.ceil((sleepEnd - Date.now()) / 60000)}m</span>` : '') + (page === 'quality' ? `<span class="pqb">${esc(String(settings.quality || 'auto').replace(/^audio$/, 'MP3'))}</span>` : '');
+    b.innerHTML = ic(icon) + (page === 'sleep' && sleepEnd ? `<span class="pqb">${Math.ceil((sleepEnd - Date.now()) / 60000)}m</span>` : '') + (page === 'quality' && hdTag() ? `<span class="pqhd">${hdTag()}</span>` : '');
     b.onclick = (e) => {
       e.stopPropagation();
       if (page === 'theater') return save({ theater: !settings.theater });
@@ -1659,7 +1675,6 @@ function saveProgress(done) {
   // A video you only started keeps its red progress bar; it counts as watched (hidden from Subscriptions) after 90%.
   if (!settings.pauseHistory && p[current.id].pct >= 90 && !isWatched(current.id)) setWatched(current.id, true);
 }
-for (const ev of ['play', 'pause', 'ended', 'emptied']) video.addEventListener(ev, () => $('#player-box').classList.toggle('is-paused', video.paused)); // our bar buttons stay up while paused, like the browser's own bar
 video.addEventListener('pause', () => saveProgress()); // keep the bar accurate when you stop, not just every few seconds
 video.addEventListener('timeupdate', () => {
   if (settings.sponsorblock) {
@@ -1964,6 +1979,88 @@ function paintChapters() {
 }
 let lastChap = -1;
 video.addEventListener('timeupdate', () => { if (!chapters.length) return; const k = chapAt(video.currentTime); if (k !== lastChap) { lastChap = k; paintChapters(); } });
+
+// ---------- custom player controls (themeable) ----------
+const pbox = $('#player-box'), pbarEl = $('#pbar'), pseek = $('#pseek');
+const vdur = () => (isFinite(video.duration) ? video.duration : 0);
+const PTHEMES = ['modern', 'youtube', 'classic', 'glass', 'minimal', 'amoled', 'light'];
+function applyPlayerTheme() {
+  for (const t of PTHEMES) pbox.classList.toggle('pt-' + t, (settings.playerTheme || 'modern') === t && t !== 'youtube');
+  if (settings.playerAccentOn && /^#[0-9a-f]{6}$/i.test(settings.playerAccent || '')) pbox.style.setProperty('--pb-accent', settings.playerAccent);
+  else pbox.style.removeProperty('--pb-accent');
+  pbarEl.classList.toggle('q-right', settings.pbSide === 'right');
+}
+let marksSig = '';
+function paintMarks() {
+  const d = vdur(), sig = d + '|' + segments.length + '|' + chapters.length + '|' + (settings.sponsorblock ? 1 : 0);
+  if (sig === marksSig) return; marksSig = sig;
+  const box = pseek.querySelector('.pmarks'); box.innerHTML = '';
+  if (!d) return;
+  if (settings.sponsorblock) for (const g of segments) box.insertAdjacentHTML('beforeend', `<i title="${esc(g.cat)}" style="left:${(g.a / d) * 100}%;width:${Math.max(0.3, ((g.b - g.a) / d) * 100)}%"></i>`);
+  for (const c of chapters) if (c.t > 0) box.insertAdjacentHTML('beforeend', `<b style="left:${(c.t / d) * 100}%"></b>`);
+}
+const hdTag = () => { const h = video.videoHeight || 0; return h >= 2160 ? '4K' : h >= 1440 ? '2K' : h >= 720 ? 'HD' : ''; };
+function paintAuto() {
+  const b = $('#pc-auto'); b.hidden = settings.pbAutoplay === false;
+  b.classList.toggle('on', !!settings.autoplayNext); b.title = 'Autoplay is ' + (settings.autoplayNext ? 'on' : 'off');
+  b.querySelector('.kn').innerHTML = ic(settings.autoplayNext ? 'play' : 'pause');
+}
+$('#pc-auto').onclick = () => save({ autoplayNext: !settings.autoplayNext }).then(paintAuto);
+function paintBar() {
+  const d = vdur(), t = video.currentTime || 0, tm = $('#pc-time');
+  if (!scrubbing) pseek.querySelector('.pplay').style.width = d ? (t / d) * 100 + '%' : '0';
+  pseek.querySelector('.pknob').style.left = d ? (t / d) * 100 + '%' : '0';
+  let be = 0; for (let i = 0; i < video.buffered.length; i++) if (video.buffered.start(i) <= t + 0.5) be = Math.max(be, video.buffered.end(i));
+  pseek.querySelector('.pbuf').style.width = d ? Math.min(100, (be / d) * 100) + '%' : '0';
+  tm.textContent = `${fmtDur(t)} / ${fmtDur(d)}`;
+  $('#pc-play').innerHTML = ic(video.paused ? 'play' : 'pause');
+  const vol = video.muted ? 0 : video.volume;
+  $('#pc-mute').innerHTML = ic(vol === 0 ? 'mute' : vol < 0.5 ? 'vollow' : 'vol');
+  $('#pc-vol').value = vol;
+  $('#pc-fs').innerHTML = ic(document.fullscreenElement ? 'fsx' : 'fs');
+  paintMarks(); paintAuto();
+}
+let scrubbing = false;
+for (const ev of ['loadedmetadata', 'resize']) video.addEventListener(ev, () => renderPQuick());
+for (const ev of ['timeupdate', 'progress', 'durationchange', 'loadedmetadata', 'resize', 'play', 'pause', 'volumechange', 'seeked', 'emptied']) video.addEventListener(ev, paintBar);
+document.addEventListener('fullscreenchange', paintBar);
+$('#pc-play').onclick = () => (video.paused ? video.play().catch(() => {}) : video.pause());
+$('#pc-mute').onclick = () => { video.muted = !video.muted; if (!video.muted && video.volume === 0) video.volume = 0.5; };
+$('#pc-vol').oninput = (e) => { video.muted = false; video.volume = +e.target.value; };
+const toggleFs = () => (document.fullscreenElement ? document.exitFullscreen() : pbox.requestFullscreen());
+$('#pc-fs').onclick = toggleFs;
+for (const b of pbarEl.querySelectorAll('button')) b.addEventListener('mousedown', (e) => e.preventDefault()); // keep keyboard shortcuts working after a click
+// click the picture to pause, double-click for full screen
+let clickT = 0;
+video.addEventListener('click', () => { clearTimeout(clickT); clickT = setTimeout(() => (video.paused ? video.play().catch(() => {}) : video.pause()), 230); });
+video.addEventListener('dblclick', () => { clearTimeout(clickT); toggleFs(); });
+// seek bar: click or drag, with a time (and chapter) tooltip on hover
+const seekFrac = (e) => { const r = pseek.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+const showTip = (e) => {
+  const d = vdur(); if (!d) return; const f = seekFrac(e), tip = $('#ptip'), r = pseek.getBoundingClientRect();
+  tip.hidden = false; tip.style.left = Math.min(r.width - 40, Math.max(40, f * r.width)) + 'px';
+  tip.innerHTML = fmtDur(f * d) + (chapters.length ? `<br><span style="opacity:.8">${esc(chapters[chapAt(f * d)].title)}</span>` : '');
+};
+pseek.addEventListener('pointerdown', (e) => {
+  if (!vdur()) return; scrubbing = true; pseek.classList.add('drag'); pseek.setPointerCapture(e.pointerId);
+  const go = (ev) => { const f = seekFrac(ev); pseek.querySelector('.pplay').style.width = f * 100 + '%'; pseek.querySelector('.pknob').style.left = f * 100 + '%'; video.currentTime = f * vdur(); showTip(ev); };
+  go(e);
+  const mv = (ev) => go(ev), up = () => { scrubbing = false; pseek.classList.remove('drag'); pseek.removeEventListener('pointermove', mv); pseek.removeEventListener('pointerup', up); paintBar(); };
+  pseek.addEventListener('pointermove', mv); pseek.addEventListener('pointerup', up);
+});
+pseek.addEventListener('pointermove', (e) => { if (!scrubbing) showTip(e); });
+pseek.addEventListener('pointerleave', () => { if (!scrubbing) $('#ptip').hidden = true; });
+// the bar fades away while the video plays and the mouse is still
+let hideT = 0;
+function showBar() {
+  pbox.classList.remove('ctl-hide'); clearTimeout(hideT);
+  if (video.paused || !$('#p-menu').hidden || scrubbing) return;
+  hideT = setTimeout(() => { if (!pbarEl.matches(':hover') && $('#p-menu').hidden && !video.paused) pbox.classList.add('ctl-hide'); }, 2600);
+}
+pbox.addEventListener('mousemove', showBar);
+pbox.addEventListener('mouseleave', () => { if (!video.paused && $('#p-menu').hidden) { clearTimeout(hideT); hideT = setTimeout(() => pbox.classList.add('ctl-hide'), 600); } });
+for (const ev of ['play', 'pause', 'ended', 'emptied']) video.addEventListener(ev, showBar);
+paintBar();
 
 let volT;
 video.addEventListener('volumechange', () => {

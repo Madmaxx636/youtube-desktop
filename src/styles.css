@@ -675,28 +675,86 @@ body.no-toolbar #toolbar-wrap{display:none}
 #c-place{display:inline-flex;align-items:center;padding:4px}
 #c-place .ico{width:19px;height:19px}
 
-/* the ⋮ button sits in the bottom control bar, right where the browser's own ⋮ was (it is emptied via controlsList) */
-.p-gear{top:auto;bottom:4px;right:6px;width:40px;height:40px;border-radius:6px;background:none;opacity:0;pointer-events:none}
-#player-box:hover .p-gear,.p-gear.open,#player-box:focus-within .p-gear{opacity:1;pointer-events:auto}
-.p-gear:hover{background:rgba(255,255,255,.15)}
-.p-gear .ico{width:20px;height:20px}
+/* ---------- custom player controls ---------- */
+#player-box{--pb-accent:#f03;--pb-fg:#fff;--pb-bg:linear-gradient(transparent,rgba(0,0,0,.78));--pb-track:rgba(255,255,255,.3);--pb-buf:rgba(255,255,255,.5);--pb-hover:rgba(255,255,255,.16);--pb-on:#f9c74f;--pb-radius:0px;--pb-gap:0px;--pb-blur:none;--pb-trackh:4px}
+#pbar{position:absolute;left:var(--pb-gap);right:var(--pb-gap);bottom:var(--pb-gap);z-index:6;color:var(--pb-fg);background:var(--pb-bg);border-radius:var(--pb-radius);backdrop-filter:var(--pb-blur);padding:22px 10px 4px;transition:opacity .2s}
+#player-box.ctl-hide #pbar{opacity:0;pointer-events:none}
+#player-box.ctl-hide{cursor:none}
+#pseek{position:relative;height:18px;margin:0 6px;cursor:pointer;touch-action:none}
+#pseek .pt{position:absolute;left:0;right:0;top:50%;height:var(--pb-trackh);transform:translateY(-50%);background:var(--pb-track);border-radius:3px;transition:height .1s;overflow:hidden}
+#pseek:hover .pt,#pseek.drag .pt{height:calc(var(--pb-trackh) + 3px)}
+#pseek .pbuf{position:absolute;left:0;top:0;bottom:0;background:var(--pb-buf);width:0}
+#pseek .pplay{position:absolute;left:0;top:0;bottom:0;background:var(--pb-accent);width:0}
+#pseek .pmarks{position:absolute;inset:0;pointer-events:none}
+#pseek .pmarks i{position:absolute;top:0;bottom:0;background:#2ba640;opacity:.85}
+#pseek .pmarks b{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:rgba(0,0,0,.65)}
+#pseek .pknob{position:absolute;top:50%;width:13px;height:13px;margin:-6.5px 0 0 -6.5px;border-radius:50%;background:var(--pb-accent);transform:scale(0);transition:transform .1s;pointer-events:none;left:0}
+#pseek:hover .pknob,#pseek.drag .pknob{transform:scale(1)}
+#ptip{position:absolute;bottom:22px;transform:translateX(-50%);background:rgba(20,20,20,.92);color:#fff;padding:4px 8px;border-radius:6px;font-size:12px;white-space:nowrap;pointer-events:none;text-align:center}
+.prow{display:flex;align-items:center;gap:2px;min-height:44px}
+.prow .grow{flex:1}
+.prow .pc,#pbar .p-gear{position:static;width:40px;height:40px;padding:0;display:flex;align-items:center;justify-content:center;background:none;color:var(--pb-fg);border-radius:6px;opacity:1;pointer-events:auto;transition:none}
+.prow .pc:hover,#pbar .p-gear:hover,#pbar .p-gear.open{background:var(--pb-hover);filter:none}
+.prow .ico{width:22px;height:22px}
+#pbar .p-gear .ico{width:20px;height:20px}
+.pvol{display:flex;align-items:center}
+.pvol input{width:0;opacity:0;transition:width .15s,opacity .15s,margin .15s;accent-color:var(--pb-accent);height:4px;margin:0}
+.pvol:hover input,.pvol:focus-within input{width:84px;opacity:1;margin:0 8px 0 2px}
+#pc-time{font-size:13px;font-variant-numeric:tabular-nums;margin:0 10px;white-space:nowrap;opacity:.95}
+#p-quick{position:static;display:flex;opacity:1;pointer-events:auto;margin-left:4px}
+#p-quick .pq{color:var(--pb-fg)}
+#p-quick .pq:hover{background:var(--pb-hover)}
+#p-quick .pq.on{color:var(--pb-on)}
+#pbar.q-right #p-quick{order:8;margin-left:0}
+#pbar.q-right .grow{order:7}
+#pbar.q-right .p-gear{order:9}#pbar.q-right #pc-fs{order:10}
+#pbar.q-right #pc-time{order:2}
 .p-gear.sleeping::after{top:6px;right:6px}
-#video::-webkit-media-controls-panel{padding-right:48px}
-.p-menu{top:auto;bottom:52px;right:10px;max-height:calc(100% - 64px)}
+.p-menu{top:auto;bottom:84px;right:10px;max-height:calc(100% - 100px)}
+#player-box:not(.ctl-hide) #video::-webkit-media-text-track-container{transform:translateY(-64px)}
+#video::-webkit-media-text-track-container{transition:transform .2s}
+/* player themes */
+#player-box.pt-classic{--pb-bg:rgba(24,24,24,.96);--pb-accent:#3ea6ff;--pb-track:#555;--pb-buf:#888;--pb-trackh:5px}
+#player-box.pt-classic #pbar{padding-top:6px}
+#player-box.pt-glass{--pb-bg:rgba(20,20,24,.42);--pb-blur:blur(14px) saturate(1.3);--pb-radius:16px;--pb-gap:12px;--pb-accent:#fff;--pb-track:rgba(255,255,255,.25);--pb-on:#ffd166}
+#player-box.pt-glass #pbar{padding-top:6px}
+#player-box.pt-minimal{--pb-bg:linear-gradient(transparent,rgba(0,0,0,.35));--pb-accent:#f03;--pb-trackh:2px;--pb-track:rgba(255,255,255,.22)}
+#player-box.pt-amoled{--pb-bg:#000;--pb-accent:#3ddc84;--pb-track:#2a2a2a;--pb-buf:#555;--pb-on:#3ddc84}
+#player-box.pt-amoled #pbar{padding-top:6px}
+#player-box.pt-light{--pb-bg:rgba(248,248,248,.94);--pb-fg:#111;--pb-accent:#f03;--pb-track:rgba(0,0,0,.18);--pb-buf:rgba(0,0,0,.3);--pb-hover:rgba(0,0,0,.08);--pb-on:#c26a00}
+#player-box.pt-light #pbar{padding-top:6px}
+#player-box.pt-light #ptip{background:#111}
+/* page animation when going back or forward */
+@keyframes pa-back{from{opacity:0;transform:translateX(-32px)}to{opacity:1;transform:none}}
+@keyframes pa-fwd{from{opacity:0;transform:translateX(32px)}to{opacity:1;transform:none}}
+@keyframes pa-fade{from{opacity:0}to{opacity:1}}
+.pa-back{animation:pa-back .26s cubic-bezier(.2,.7,.2,1)}
+.pa-fwd{animation:pa-fwd .26s cubic-bezier(.2,.7,.2,1)}
+.pa-fade{animation:pa-fade .22s ease-out}
+/* watched videos: optionally no fading */
+body.no-dim .card.watched,body.no-dim .subrow.watched,body.no-dim .vrow.watched{opacity:1}
 
-/* fixed buttons in the video bar, just left of the ⋮ */
-#p-quick{position:absolute;bottom:4px;right:50px;z-index:6;display:flex;gap:0;opacity:0;pointer-events:none;transition:opacity .15s}
-#player-box:hover #p-quick,#player-box:focus-within #p-quick{opacity:1;pointer-events:auto}
-#p-quick .pq{position:relative;background:none;color:#fff;border-radius:6px;min-width:40px;height:40px;padding:0 8px;display:flex;align-items:center;justify-content:center;gap:4px}
-#p-quick .pq:hover{background:rgba(255,255,255,.15);filter:none}
-#p-quick .pq.on{color:#f9c74f}
-#p-quick .pq .ico{width:20px;height:20px}
-#p-quick .pqb{font-size:11px;font-weight:600}
-#video::-webkit-media-controls-panel{padding-right:calc(48px + var(--pq-n,0) * 44px)}
-
-/* the player bar: our buttons ride on the control row (above the timeline); the browser's own ⋮ is hidden */
-#video::-webkit-media-controls-overflow-button{display:none}
-#p-quick{bottom:45px;right:50px}
-.p-gear{bottom:45px}
-.p-menu{bottom:92px}
-#player-box.is-paused .p-gear,#player-box.is-paused #p-quick{opacity:1;pointer-events:auto}
+/* modern look: thin full-width timeline, round icons, time in a pill, autoplay switch, gear with an HD tag */
+#player-box.pt-modern{--pb-bg:linear-gradient(transparent,rgba(0,0,0,.72) 60%);--pb-accent:#3ea6ff;--pb-track:rgba(255,255,255,.22);--pb-buf:rgba(255,255,255,.38);--pb-trackh:3px}
+#pbar{padding:26px 12px 6px}
+#pseek{margin:0 2px}
+.prow .ico{width:24px;height:24px}
+.prow .pc,#pbar .p-gear,#p-quick .pq{width:44px;height:44px;border-radius:22px}
+#p-quick .pq{min-width:44px;padding:0}
+#pbar .p-gear .ico{width:22px;height:22px}
+#pc-time{background:rgba(48,48,48,.82);border-radius:20px;padding:8px 14px;margin:0 8px;font-size:13px}
+#player-box.pt-light #pc-time{background:rgba(0,0,0,.08)}
+#p-quick .pqhd{position:absolute;top:5px;right:2px;background:var(--pb-accent);color:#000;font-size:8px;font-weight:800;line-height:1;padding:2px 3px;border-radius:3px;letter-spacing:.2px}
+#player-box.pt-modern .pknob,#player-box.pt-classic .pknob{transform:scale(.85)}
+#pc-auto{width:auto!important;padding:0 6px!important}
+#pc-auto[hidden]{display:none}
+#pc-auto .sw{position:relative;display:block;width:34px;height:14px;border-radius:7px;background:rgba(255,255,255,.35);transition:background .15s}
+#pc-auto .kn{position:absolute;left:-2px;top:-3px;width:20px;height:20px;border-radius:50%;background:#fff;color:#111;display:flex;align-items:center;justify-content:center;transition:left .15s;box-shadow:0 1px 3px rgba(0,0,0,.5)}
+#pc-auto .kn .ico{width:11px!important;height:11px!important;stroke-width:2.4}
+#pc-auto.on .sw{background:var(--pb-accent)}
+#pc-auto.on .kn{left:16px}
+#pbar.q-right #pc-auto{order:8}
+#pbar.q-right #p-quick{order:9}
+#pbar.q-right .p-gear{order:10}
+#pbar.q-right #pc-fs{order:11}
+#player-box:not(.ctl-hide) #video::-webkit-media-text-track-container{transform:translateY(-78px)}
