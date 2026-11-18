@@ -2,7 +2,16 @@
 
 A desktop YouTube client (Electron) with its own UI, built on `youtubei.js` for browsing and `yt-dlp` for streams and downloads.
 
-## Run
+> Unofficial. Not affiliated with, endorsed by or sponsored by YouTube or Google. YouTube is a trademark of Google LLC.
+
+## Download
+
+Builds are on the Releases page, with SHA-256 checksums in `SHA256SUMS`:
+
+- Windows: `YouTube-Desktop-<version>-Setup.exe` (installer) or `-Portable.exe`. `yt-dlp.exe` is bundled; merged downloads and MP3 conversion need `ffmpeg` on PATH. The files are unsigned, so SmartScreen will warn on first run.
+- Linux: `.deb` (`sudo apt install ./youtube-desktop_<version>_amd64.deb`) or the AppImage.
+
+## Run from source
 
     npm install
     npm start
@@ -21,7 +30,7 @@ Requires `yt-dlp` and `ffmpeg`. Keep yt-dlp current: YouTube breaks old builds. 
 - Sign in with Google's device-code page, switch accounts and channels, notifications, like/dislike, subscribe
 - Mini player with size, screen corner, opacity, always-on-top and open-on-minimize settings; picture-in-picture; tray; media keys; global hotkey (Ctrl+Alt+Y)
 - Player settings menu on the video (quality, speed, subtitles, sleep timer, buffer), sleep timer, buffer-ahead cache
-- Customizable player buttons, theater mode, Modern and Classic (2012) skins, themes (including custom colors), interface scale, spacing, thumbnail size, sidebar and related-video layout, custom CSS
+- Own player control bar with six player themes, customizable player buttons, theater mode, comments in the side column or below the video, trackpad swipe for back and forward, page animations, Modern and Classic (2012) skins, themes (including custom colors), interface scale, spacing, thumbnail size, sidebar and related-video layout, custom CSS
 
 All of it is configurable under Settings (gear icon).
 
