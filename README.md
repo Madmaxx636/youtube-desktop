@@ -4,6 +4,8 @@ A desktop YouTube client (Electron) with its own UI, built on `youtubei.js` for 
 
 > Unofficial. Not affiliated with, endorsed by or sponsored by YouTube or Google. YouTube is a trademark of Google LLC.
 
+![Search results in YouTube Desktop](docs/search.png)
+
 ## Download
 
 Builds are on the Releases page, with SHA-256 checksums in `SHA256SUMS`:
