@@ -758,3 +758,9 @@ body.no-dim .card.watched,body.no-dim .subrow.watched,body.no-dim .vrow.watched{
 #pbar.q-right .p-gear{order:10}
 #pbar.q-right #pc-fs{order:11}
 #player-box:not(.ctl-hide) #video::-webkit-media-text-track-container{transform:translateY(-78px)}
+
+/* update notice */
+#update-bar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:12px;background:var(--bg2,#222);color:var(--fg,#fff);border:1px solid var(--line,rgba(255,255,255,.15));border-radius:12px;padding:10px 14px;box-shadow:0 8px 28px rgba(0,0,0,.45);font-size:14px;max-width:min(92vw,620px)}
+#update-bar[hidden]{display:none}
+#update-bar button{padding:6px 14px;border-radius:8px}
+#update-bar button.ghost{background:none;color:var(--fg2,#aaa)}

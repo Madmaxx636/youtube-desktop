@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0
+
+- Update notice: the app checks this project's GitHub releases at start-up and every six hours and shows "Version X is available" with Update / Later. Nothing installs without your click. The Windows installer and the AppImage download the update and restart into it; the .deb and the portable .exe open the release page instead.
+- Settings, General, Updates: turn the automatic check off, or check right now.
+- The check contacts api.github.com only. This is the first version that can update itself, so 0.6.1 and older need one manual install of 0.7.0.
+
+
 ## 0.6.1
 
 - Windows build: an installer (YouTube-Desktop-0.6.1-Setup.exe) and a portable .exe, with yt-dlp.exe bundled. Downloads that merge video and audio, and MP3 conversion, still need ffmpeg on PATH.

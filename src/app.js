@@ -116,6 +116,7 @@ const ACTIONS = {
     await save({ ...D, toolbar: null, toolbarHidden: false, speed: 1, downloadDir: '' });
   },
   resetToolbar: () => save({ toolbar: null, toolbarHidden: false, menuActions: null }),
+  async checkUpdate() { toast('Checking for updates…'); const u = await api.updateCheck(); if (u.status === 'none') toast(`You have the latest version (${u.current}).`); else if (u.status === 'error') toast('Could not check: ' + u.error); },
   openDownloads: () => api.openDownloads(),
   relaunch: () => api.relaunch(),
   clearHistory() { if (confirm('Clear your local watch history, watched marks and resume positions?')) for (const k of ['history', 'watched', 'progress']) localStorage.removeItem(k); },
@@ -2061,6 +2062,25 @@ pbox.addEventListener('mousemove', showBar);
 pbox.addEventListener('mouseleave', () => { if (!video.paused && $('#p-menu').hidden) { clearTimeout(hideT); hideT = setTimeout(() => pbox.classList.add('ctl-hide'), 600); } });
 for (const ev of ['play', 'pause', 'ended', 'emptied']) video.addEventListener(ev, showBar);
 paintBar();
+
+
+// ---------- app updates ----------
+let updDismissed = '';
+function paintUpdate(u) {
+  const bar = $('#update-bar'); if (!u) return;
+  const v = esc(u.version || '');
+  let html = '';
+  if (u.status === 'available' && updDismissed !== u.version) html = `<span>Version <b>${v}</b> is available (you have ${esc(u.current)}).</span><button data-a="go">${u.auto ? 'Update' : 'Get it'}</button><button data-a="later" class="ghost">Later</button>`;
+  else if (u.status === 'downloading') html = `<span>Downloading version ${v}… ${u.pct || 0}%</span>`;
+  else if (u.status === 'ready') html = `<span>Version ${v} is ready.</span><button data-a="restart">Restart to update</button><button data-a="later" class="ghost">Later</button>`;
+  else if (u.status === 'error' && u.manual) html = `<span>Update problem: ${esc(u.error || '')}</span><button data-a="later" class="ghost">Dismiss</button>`;
+  bar.hidden = !html; bar.innerHTML = html;
+  bar.querySelector('[data-a=go]')?.addEventListener('click', () => api.updateInstall().catch((e) => toast('Update failed: ' + e.message)));
+  bar.querySelector('[data-a=restart]')?.addEventListener('click', () => api.updateRestart());
+  bar.querySelector('[data-a=later]')?.addEventListener('click', () => { updDismissed = u.version || 'x'; bar.hidden = true; });
+}
+api.onUpdate(paintUpdate);
+api.updateState().then(paintUpdate).catch(() => {});
 
 let volT;
 video.addEventListener('volumechange', () => {

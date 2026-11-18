@@ -9,7 +9,7 @@ const SB_CATS = [['sponsor', 'Sponsor'], ['selfpromo', 'Self promotion'], ['inte
 
 const SCHEMA = {
   defaults: {
-    startPage: 'home', logoGoes: 'home', playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
+    startPage: 'home', logoGoes: 'home', autoUpdateCheck: true, playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
     commentsPlace: 'below', commentsSideHeight: 75, commentsAuto: true, commentsSortDefault: 'TOP_COMMENTS', commentsSize: 100, commentsDensity: 'comfortable', commentsLines: '5', commentsAvatars: true, commentsLikes: true, commentsBadges: true, commentsActions: true, commentsBlock: '', commentsHideLinks: false, composerStyle: 'expand', composerSubmit: 'ctrl', composerConfirm: true, composerDrafts: true, composerCounter: true, afterPost: 'newest',
     autoplayNext: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
     quality: 'auto', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
@@ -41,6 +41,10 @@ const SCHEMA = {
       { title: 'Advanced', items: [
         { key: 'windowSystem', type: 'select', label: 'Window system', options: opt(['auto', 'Automatic'], ['x11', 'X11 (XWayland)']), hint: 'On Linux with Wayland, apps cannot choose where their windows appear or keep them on top. X11 restores both for the mini player. Needs a restart.' },
         { type: 'button', label: 'Restart the app now', action: 'relaunch' },
+      ] },
+      { title: 'Updates', items: [
+        { key: 'autoUpdateCheck', type: 'toggle', label: 'Check for new versions automatically', hint: 'Looks at this app\'s GitHub releases when it starts and every few hours. Nothing is installed without your OK.' },
+        { type: 'button', label: 'Check for updates now', action: 'checkUpdate' },
       ] },
       { title: 'Reset', items: [{ type: 'button', label: 'Reset all settings to defaults', action: 'resetAll', danger: true }] },
     ] },

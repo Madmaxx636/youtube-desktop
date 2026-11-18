@@ -798,8 +798,57 @@ const handlers = {
     if (f.startsWith(root + path.sep) && fs.existsSync(f)) { shell.showItemInFolder(f); return true; }
     return false;
   },
+  'update:check'() { return checkUpdate(true); },
+  'update:state'() { return { ...upd, current: thisVersion(), auto: canSelfUpdate() }; },
+  async 'update:install'() {
+    if (upd.status !== 'available') return upd;
+    if (!canSelfUpdate()) { if (!HIDDEN && /^https:\/\//.test(upd.url || '')) shell.openExternal(upd.url); return upd; }
+    pushUpd({ status: 'downloading', pct: 0 });
+    const u = getUpdater(); await u.checkForUpdates(); await u.downloadUpdate();
+    return upd;
+  },
+  'update:restart'() { if (upd.status === 'ready') getUpdater().quitAndInstall(); return true; },
   'app:copy'(text) { clipboard.writeText(String(text)); return true; },
 };
+
+// ---------- updates ----------
+// Looks at the latest GitHub release. The NSIS installer (Windows) and the AppImage can update themselves through
+// electron-updater; the .deb and the portable .exe just get a link to the release page.
+const UPDATE_REPO = 'Madmaxx636/youtube-desktop';
+const thisVersion = () => process.env.YT_FAKE_VERSION || app.getVersion();
+const cmpVer = (a, b) => { const x = String(a).replace(/^v/, '').split('.').map(Number), y = String(b).replace(/^v/, '').split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0) ? 1 : -1; } return 0; };
+const canSelfUpdate = () => app.isPackaged && ((process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR) || (process.platform === 'linux' && !!process.env.APPIMAGE));
+let upd = { status: 'idle', current: null };
+const pushUpd = (patch) => { upd = { ...upd, ...patch, current: thisVersion() }; for (const w of [win]) if (w && !w.isDestroyed()) w.webContents.send('update', upd); return upd; };
+let updater;
+function getUpdater() {
+  if (updater) return updater;
+  updater = require('electron-updater').autoUpdater;
+  updater.autoDownload = false; updater.autoInstallOnAppQuit = true;
+  updater.on('download-progress', (p) => pushUpd({ status: 'downloading', pct: Math.round(p.percent) }));
+  updater.on('update-downloaded', () => pushUpd({ status: 'ready' }));
+  updater.on('error', (e) => pushUpd({ status: 'error', error: String(e.message || e).slice(0, 200) }));
+  return updater;
+}
+async function checkUpdate(manual) {
+  if (['downloading', 'ready'].includes(upd.status)) return upd;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'youtube-desktop-updater' } });
+    if (!r.ok) throw new Error('GitHub answered ' + r.status);
+    const rel = await r.json();
+    const v = String(rel.tag_name || '').replace(/^v/, '');
+    if (!v || cmpVer(v, thisVersion()) <= 0) return pushUpd({ status: 'none', version: v, manual: !!manual });
+    return pushUpd({ status: 'available', version: v, url: rel.html_url, notes: String(rel.body || '').slice(0, 1500), auto: canSelfUpdate(), manual: !!manual });
+  } catch (e) {
+    return pushUpd({ status: manual ? 'error' : upd.status, error: String(e.message || e), manual: !!manual });
+  }
+}
+let updTimer;
+function scheduleUpdateChecks() {
+  if (!app.isPackaged && !process.env.YT_FAKE_VERSION) return;
+  const run = () => { if (cfg().autoUpdateCheck !== false) checkUpdate(false); };
+  setTimeout(run, 20000); updTimer = setInterval(run, 6 * 3600 * 1000);
+}
 
 for (const [name, fn] of Object.entries(handlers)) {
   ipcMain.handle(name, async (_e, ...args) => {
@@ -897,6 +946,7 @@ try {
 } catch {}
 
 app.whenReady().then(() => {
+  scheduleUpdateChecks();
   createWindow();
   if (HIDDEN) return;
   createTray();
