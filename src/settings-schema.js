@@ -10,15 +10,15 @@ const SB_CATS = [['sponsor', 'Sponsor'], ['selfpromo', 'Self promotion'], ['inte
 const SCHEMA = {
   defaults: {
     startPage: 'home', hideShorts: true, closeToTray: false, windowSystem: 'auto',
-    autoplayNext: true, resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100,
-    quality: 'auto', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0',
+    autoplayNext: true, resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
+    quality: 'auto', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
     dlContainer: 'mp4', dlMaxHeight: '1080', dlCodec: 'auto', dlFps: '0', dlAudioFormat: 'mp3', dlAudioQuality: '0',
     dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
     dlTemplate: '%(title)s [%(id)s].%(ext)s', dlRateLimit: '', dlFragments: '4', dlPlaylistFolders: true, dlNotify: true,
     subDefaultOn: false, subLang: 'en', subAllowAuto: true, subSize: 100, subFont: 'sans', subColor: '#ffffff', subBg: '#000000', subBgOpacity: 75, subEdge: 'none',
     miniSize: 'medium', miniCorner: 'bottom-right', miniOnTop: true, miniOpacity: 100, miniFrameless: true, miniOnMinimize: false, miniMargin: 16,
-    skin: 'modern', theme: 'dark', accent: '#ff0000', cBg: '#0f0f0f', cSurface: '#272727', cText: '#f1f1f1', cLink: '#3ea6ff', uiScale: '1', density: 'comfortable', css: '',
-    gridSize: 300, sidebarDefault: true, nav_home: true, nav_subs: true, nav_playlists: true, nav_history: true, nav_watchlater: true, nav_downloads: true,
+    skin: 'modern', theme: 'dark', accent: '#ff0000', cBg: '#0f0f0f', cSurface: '#272727', cText: '#f1f1f1', cLink: '#3ea6ff', uiScalePct: 100, fontSize: 14, iconSize: 20, density: 'comfortable', css: '',
+    gridSize: 300, sidebarDefault: true, sidebarWidth: 200, sidebarAutoHide: 'never', relatedWidth: 400, toolbarSize: 40, toolLabels: false, nav_home: true, nav_subs: true, nav_playlists: true, nav_history: true, nav_watchlater: true, nav_downloads: true,
     watchRelated: 'side', theater: false, commentsHidden: false, descExpanded: false, showDislikes: true,
     subsView: 'grouped', subsGroupBy: 'date', subsHideWatched: true, subsSort: 'new', subsLayout: 'list',
     sponsorblock: true, sbc_sponsor: true, sbc_selfpromo: true, sbc_interaction: true, sbc_intro: true, sbc_outro: true, sbc_preview: false, sbc_music_offtopic: false, sbc_filler: false,
@@ -45,6 +45,10 @@ const SCHEMA = {
         { key: 'defaultSpeed', type: 'select', label: 'Default speed', options: opt('0.5', '0.75', '1', '1.25', '1.5', '1.75', '2'), when: (s) => !s.rememberSpeed },
         { key: 'defaultVolume', type: 'range', label: 'Starting volume', min: 0, max: 100, step: 5, unit: '%' },
       ] },
+      { title: 'Sleep timer', items: [
+        { key: 'sleepAction', type: 'select', label: 'When the timer ends', options: opt(['pause', 'Pause playback'], ['quit', 'Pause and quit the app']) },
+        { key: 'sleepFade', type: 'select', label: 'Fade the volume out over', options: opt(['0', 'No fade'], ['10', '10 seconds'], ['30', '30 seconds'], ['60', '1 minute']) },
+      ] },
     ] },
     { id: 'video', label: 'Video & audio', groups: [
       { title: 'Streaming quality', hint: 'Applies to the next video you open. If a combination does not exist for a video, the closest match plays instead.', items: [
@@ -52,6 +56,10 @@ const SCHEMA = {
         { key: 'fps', type: 'select', label: 'Frame rate limit', options: opt(['0', 'No limit'], ['30', '30 fps'], ['60', '60 fps']) },
         { key: 'codec', type: 'select', label: 'Video codec', options: CODECS, hint: 'Automatic uses H.264 up to 1080p for the smoothest playback.' },
         { key: 'maxVideoBitrate', type: 'select', label: 'Video bitrate limit', options: opt(['0', 'No limit'], ['1000', '1 Mbps'], ['2500', '2.5 Mbps'], ['5000', '5 Mbps'], ['8000', '8 Mbps'], ['15000', '15 Mbps']) },
+      ] },
+      { title: 'Buffering', hint: 'Streams go through a small local cache that downloads ahead in steady chunks. This smooths out stutters from slow or throttled connections.', items: [
+        { key: 'bufferProxy', type: 'toggle', label: 'Buffer ahead through the local cache' },
+        { key: 'bufferSeconds', type: 'select', label: 'Buffer ahead', options: opt(['15', '15 seconds'], ['30', '30 seconds'], ['60', '1 minute'], ['120', '2 minutes'], ['300', '5 minutes']), when: (s) => s.bufferProxy !== false, hint: 'More buffer uses more memory (a few hundred MB for 4K at 5 minutes). Applies to the next video.' },
       ] },
       { title: 'Audio', items: [
         { key: 'audioCodec', type: 'select', label: 'Audio codec', options: opt(['auto', 'Automatic'], ['aac', 'AAC'], ['opus', 'Opus']) },
@@ -127,7 +135,9 @@ const SCHEMA = {
         { key: 'cLink', type: 'color', label: 'Links', when: (s) => s.theme === 'custom' },
       ] },
       { title: 'Size and spacing', items: [
-        { key: 'uiScale', type: 'select', label: 'Interface scale', options: opt(['0.85', '85%'], ['0.9', '90%'], ['1', '100%'], ['1.1', '110%'], ['1.25', '125%'], ['1.5', '150%']) },
+        { key: 'uiScalePct', type: 'range', label: 'Interface scale (everything)', min: 70, max: 200, step: 5, unit: '%' },
+        { key: 'fontSize', type: 'range', label: 'Text size', min: 11, max: 22, step: 1, unit: ' px' },
+        { key: 'iconSize', type: 'range', label: 'Icon size', min: 14, max: 32, step: 1, unit: ' px' },
         { key: 'density', type: 'select', label: 'Spacing', options: opt(['compact', 'Compact'], ['comfortable', 'Comfortable'], ['spacious', 'Spacious']) },
       ] },
       { title: 'Custom CSS', items: [{ key: 'css', type: 'textarea', label: 'Your own styles' }] },
@@ -136,17 +146,22 @@ const SCHEMA = {
       { title: 'Video grid', items: [{ key: 'gridSize', type: 'range', label: 'Thumbnail size', min: 200, max: 460, step: 20, unit: ' px' }] },
       { title: 'Sidebar', items: [
         { key: 'sidebarDefault', type: 'toggle', label: 'Show the sidebar' },
+        { key: 'sidebarWidth', type: 'range', label: 'Sidebar width (you can also drag its edge)', min: 150, max: 420, step: 5, unit: ' px' },
+        { key: 'sidebarAutoHide', type: 'select', label: 'Hide the sidebar automatically', options: opt(['never', 'Never'], ['watch', 'While watching a video']), hint: 'While watching, the menu button slides the sidebar in over the video.' },
         { key: 'nav_home', type: 'toggle', label: 'Home' }, { key: 'nav_subs', type: 'toggle', label: 'Subscriptions' },
         { key: 'nav_playlists', type: 'toggle', label: 'Playlists' }, { key: 'nav_history', type: 'toggle', label: 'History' },
         { key: 'nav_watchlater', type: 'toggle', label: 'Watch later' }, { key: 'nav_downloads', type: 'toggle', label: 'Downloads' },
       ] },
       { title: 'Watch page', items: [
         { key: 'theater', type: 'toggle', label: 'Theater mode (wide player)' },
+        { key: 'toolbarSize', type: 'range', label: 'Player button size', min: 28, max: 64, step: 2, unit: ' px' },
+        { key: 'toolLabels', type: 'toggle', label: 'Show text labels on player buttons' },
+        { key: 'relatedWidth', type: 'range', label: 'Related videos column width', min: 280, max: 600, step: 10, unit: ' px', when: (s) => s.watchRelated === 'side' },
         { key: 'watchRelated', type: 'select', label: 'Related videos', options: opt(['side', 'Beside the video'], ['below', 'Below'], ['hidden', 'Hidden']) },
         { key: 'descExpanded', type: 'toggle', label: 'Show the full description by default' },
         { key: 'commentsHidden', type: 'toggle', label: 'Hide comments' },
         { key: 'showDislikes', type: 'toggle', label: 'Show dislike counts' },
-        { type: 'info', text: 'Player buttons: use ✎ under the video to add, remove or reorder them.' },
+        { type: 'info', text: 'Player buttons: use Customize under the video to add, remove or reorder them. Quality, speed and subtitles are in the slider menu on the video.' },
         { type: 'button', label: 'Reset player buttons', action: 'resetToolbar' },
       ] },
     ] },

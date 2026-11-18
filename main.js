@@ -1,5 +1,7 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, shell, nativeImage, dialog, Notification, clipboard, safeStorage, screen } = require('electron');
 const os = require('os');
+const http = require('http');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { spawn, execFile } = require('child_process');
@@ -113,6 +115,7 @@ function tileVideo(t) {
     id, title: rt(t.metadata?.tileMetadataRenderer?.title), channel: first && first !== views && first !== published ? first : '',
     channelId: /"browseId":"(UC[\w-]{22})"/.exec(JSON.stringify(t))?.[1] || '', channelThumb: '',
     views, published, duration, thumb: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, isShort: type === 'TILE_CONTENT_TYPE_SHORTS',
+    watchedPct: Number((t.header?.tileHeaderRenderer?.thumbnailOverlays || []).map((o) => o.thumbnailOverlayResumePlaybackRenderer?.percentDurationWatched).find((x) => x != null)) || 0,
   };
 }
 const tileVideos = (tiles) => { const seen = new Set(); return tiles.map(tileVideo).filter((v) => v && !seen.has(v.id) && seen.add(v.id)); };
@@ -158,6 +161,7 @@ function mapVideo(v) {
     duration: txt(v.duration) || v.length_text?.text || '',
     thumb: thumb(v.thumbnails) || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
     isShort: v.type === 'ShortsLockupView' || v.type === 'ReelItem',
+    watchedPct: Number((v.thumbnail_overlays || []).find((o) => o.type === 'ThumbnailOverlayResumePlayback')?.percent_duration_watched) || 0,
   };
 }
 
@@ -228,6 +232,7 @@ const DEF = {
   dlContainer: 'mp4', dlMaxHeight: 1080, dlCodec: 'auto', dlFps: 0, dlAudioFormat: 'mp3', dlAudioQuality: '0',
   dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
   dlTemplate: '%(title)s [%(id)s].%(ext)s', dlRateLimit: '', dlFragments: 4, dlPlaylistFolders: true, dlNotify: true,
+  bufferProxy: true, bufferSeconds: 60,
   miniSize: 'medium', miniCorner: 'bottom-right', miniOnTop: true, miniOpacity: 100, miniFrameless: true, miniOnMinimize: false, miniMargin: 16,
 };
 const cfg = () => ({ ...DEF, ...store.read() });
@@ -322,6 +327,106 @@ function runJob(key, url, args, { playlist = false } = {}) {
   return true;
 }
 
+
+// ---------- local streaming cache ----------
+// The player reads video and audio from a loopback server instead of straight from YouTube. The server pulls the
+// file in steady 2 MB ranges (the same pattern yt-dlp uses to avoid throttling) and keeps the chosen number of
+// seconds downloaded ahead of the playhead, so short network hiccups never reach the player.
+const CHUNK = 2 * 1024 * 1024, MAX_CONCURRENT = 6, MAX_AHEAD_BYTES = 384 * 1024 * 1024;
+const PROXY_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+const streamsMap = new Map();
+let proxyPromise = null, proxyPort = 0, activeFetches = 0;
+const fetchQ = { hi: [], lo: [] };
+function acquireSlot(entry, hi) {
+  return new Promise((resolve) => { if (activeFetches < MAX_CONCURRENT) { activeFetches++; return resolve(); } entry.resolve = resolve; (hi ? fetchQ.hi : fetchQ.lo).push(entry); });
+}
+function releaseSlot() { activeFetches--; const e = fetchQ.hi.shift() || fetchQ.lo.shift(); if (e) { activeFetches++; e.resolve(); } }
+function boostEntry(entry) { const i = fetchQ.lo.indexOf(entry); if (i >= 0) { fetchQ.lo.splice(i, 1); fetchQ.hi.push(entry); } }
+async function fetchChunk(st, ci, entry, hi) {
+  const a = ci * CHUNK, b = Math.min(a + CHUNK - 1, st.size - 1);
+  await acquireSlot(entry, hi);
+  try {
+    for (let tries = 0; ; tries++) {
+      try {
+        const r = await fetch(`${st.url}&range=${a}-${b}`, { headers: { 'User-Agent': PROXY_UA } });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length !== b - a + 1) throw new Error('short read');
+        return buf;
+      } catch (e) { if (tries >= 2) throw e; await new Promise((r) => setTimeout(r, 300 * (tries + 1))); }
+    }
+  } finally { releaseSlot(); }
+}
+function chunk(st, ci, hi) {
+  let entry = st.chunks.get(ci);
+  if (!entry) {
+    entry = {};
+    entry.p = fetchChunk(st, ci, entry, hi);
+    entry.p.catch(() => st.chunks.delete(ci)); // a failed chunk is retried on the next request
+    st.chunks.set(ci, entry);
+  } else if (hi) boostEntry(entry);
+  return entry.p;
+}
+function prefetch(st, ci) {
+  const secs = Math.min(600, Math.max(5, num(cfg().bufferSeconds) || 60));
+  const bytesPerSec = st.dur ? st.size / st.dur : 400000;
+  const ahead = Math.max(2, Math.min(Math.ceil((secs * bytesPerSec) / CHUNK), Math.floor(MAX_AHEAD_BYTES / CHUNK)));
+  for (let k = 1; k <= ahead; k++) if ((ci + k) * CHUNK < st.size) chunk(st, ci + k, false).catch(() => {});
+  for (const k of [...st.chunks.keys()]) if (k < ci - 1 || k > ci + ahead + 1) st.chunks.delete(k); // keeps memory bounded
+}
+async function handleProxy(req, res) {
+  const m = /^\/s\/([0-9a-f]{24})$/.exec((req.url || '').split('?')[0]);
+  const st = m && streamsMap.get(m[1]);
+  if (!st) { res.writeHead(404); return res.end(); }
+  const size = st.size;
+  let start = 0, end = size - 1;
+  const rg = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  if (rg) {
+    if (rg[1] === '' && rg[2] === '') { res.writeHead(416); return res.end(); }
+    if (rg[1] === '') start = Math.max(0, size - +rg[2]); else { start = +rg[1]; if (rg[2] !== '') end = Math.min(+rg[2], size - 1); }
+  }
+  if (start >= size || start > end) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
+  res.writeHead(rg ? 206 : 200, { 'Content-Type': st.mime, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'no-store', ...(rg ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}) });
+  let closed = false;
+  const gone = new Promise((r) => res.on('close', () => { closed = true; r(); }));
+  st.last = Date.now();
+  try {
+    let pos = start;
+    while (pos <= end && !closed) {
+      const ci = Math.floor(pos / CHUNK);
+      const need = chunk(st, ci, true); // the chunk playback needs now jumps the queue
+      prefetch(st, ci);
+      const buf = await Promise.race([need, gone.then(() => null)]);
+      if (!buf) break;
+      const piece = buf.subarray(pos - ci * CHUNK, Math.min(buf.length, end - ci * CHUNK + 1));
+      if (!res.write(piece)) await Promise.race([new Promise((r) => res.once('drain', r)), gone]);
+      pos += piece.length;
+    }
+  } catch { res.destroy(); return; }
+  if (!closed) res.end();
+}
+function ensureProxy() {
+  if (!proxyPromise) proxyPromise = new Promise((resolve, reject) => {
+    const srv = http.createServer((q, s) => handleProxy(q, s).catch(() => s.destroy()));
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => { proxyPort = srv.address().port; resolve(); });
+  });
+  return proxyPromise;
+}
+// Returns a loopback URL for a googlevideo URL, or the original URL if it can't be proxied.
+async function proxied(url) {
+  if (!url || cfg().bufferProxy === false) return url;
+  let u; try { u = new URL(url); } catch { return url; }
+  const size = Number(u.searchParams.get('clen'));
+  if (!size || !/googlevideo\.com$/.test(u.hostname)) return url;
+  await ensureProxy();
+  for (const [k, s] of streamsMap) if (Date.now() - (s.last || s.created) > 15 * 60 * 1000) { s.chunks.clear(); streamsMap.delete(k); }
+  while (streamsMap.size >= 8) { const [k, s] = streamsMap.entries().next().value; s.chunks.clear(); streamsMap.delete(k); }
+  const token = crypto.randomBytes(12).toString('hex');
+  streamsMap.set(token, { url, size, dur: Number(u.searchParams.get('dur')) || 0, mime: decodeURIComponent(u.searchParams.get('mime') || 'video/mp4'), chunks: new Map(), created: Date.now() });
+  return `http://127.0.0.1:${proxyPort}/s/${token}`;
+}
+
 const handlers = {
   async 'yt:home'(seeds) {
     // Signed in: your real recommendations from the TV home page.
@@ -387,8 +492,8 @@ const handlers = {
     const c = cfg();
     const q = quality || c.quality || 'auto';
     const lines = (await ytdlp(['-g', '-f', streamFormat(q, c), '--no-playlist', `https://www.youtube.com/watch?v=${id}`])).trim().split('\n');
-    if (q === 'audio') return { video: null, audio: lines[0] };
-    return lines.length > 1 ? { video: lines[0], audio: lines[1] } : { video: lines[0], audio: null };
+    if (q === 'audio') return { video: null, audio: await proxied(lines[0]) };
+    return lines.length > 1 ? { video: await proxied(lines[0]), audio: await proxied(lines[1]) } : { video: await proxied(lines[0]), audio: null };
   },
   'yt:download'(id, kind, opts) {
     if (!/^[\w-]{11}$/.test(id)) throw new Error('Bad video id.');
@@ -528,6 +633,14 @@ const handlers = {
   },
   'app:openExternal'(url) { if (/^https:\/\//.test(url)) shell.openExternal(url); },
   'app:mini'(on) { toggleMini(on); },
+  // Diagnostics: how much each active stream has downloaded ahead in the local cache.
+  'dev:streamStats'() {
+    return [...streamsMap.values()].map((s) => {
+      const keys = [...s.chunks.keys()].sort((a, b) => a - b), bps = s.dur ? s.size / s.dur : 0;
+      return { kind: s.mime.split('/')[0], mb: +(s.size / 1048576).toFixed(1), seconds: s.dur, cachedChunks: keys.length, cachedSecondsApprox: bps ? Math.round((keys.length * CHUNK) / bps) : null, cachedMB: +(keys.length * CHUNK / 1048576).toFixed(1) };
+    });
+  },
+  'app:quit'() { quitting = true; app.quit(); return true; },
   'app:relaunch'() { app.relaunch(); quitting = true; app.exit(0); return true; },
   'app:openDownloads'() { const d = cfg().downloadDir || app.getPath('downloads'); fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); },
   'app:showFile'(p) {

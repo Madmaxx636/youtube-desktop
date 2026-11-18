@@ -18,6 +18,7 @@ function setWatched(ids, on) {
 
 // ---------- settings ----------
 const D = SCHEMA.defaults;
+const LIVE_LAYOUT = new Set(['fontSize', 'iconSize', 'toolbarSize', 'sidebarWidth', 'relatedWidth', 'gridSize']);
 const IS_WAYLAND = api.session === 'wayland';
 const THEMES = {
   dark: { bg: '#0f0f0f', bg2: '#272727', bg3: '#1a1a1a', fg: '#f1f1f1', fg2: '#aaaaaa', line: '#303030', link: '#3ea6ff' },
@@ -65,7 +66,11 @@ function applyLayout() {
   $('#comments-box').classList.toggle('collapsed', !!settings.commentsHidden);
   $('#c-toggle').textContent = settings.commentsHidden ? 'Show' : 'Hide';
   $('#r-dislikes').style.display = settings.showDislikes === false ? 'none' : '';
-  const z = parseFloat(settings.uiScale) || 1;
+  root.setProperty('--fs', (settings.fontSize || 14) + 'px'); root.setProperty('--icon', (settings.iconSize || 20) + 'px');
+  root.setProperty('--tool-h', (settings.toolbarSize || 40) + 'px'); root.setProperty('--side-w', (settings.sidebarWidth || 200) + 'px');
+  root.setProperty('--related-w', (settings.relatedWidth || 400) + 'px');
+  syncSideAuto();
+  const z = (settings.uiScalePct || 100) / 100;
   if (z !== lastZoom) { lastZoom = z; api.setZoom(z); }
 }
 const CUE_FONTS = { sans: 'Roboto,Arial,sans-serif', serif: 'Georgia,serif', mono: '"DejaVu Sans Mono",monospace', casual: '"Comic Sans MS",cursive' };
@@ -81,7 +86,7 @@ function applySettings() {
   if (!$('#settings').hidden) renderSettings(true);
 }
 async function save(p) { settings = await api.setSettings(p); applySettings(); }
-$('#menu-btn').onclick = () => save({ sidebarDefault: settings.sidebarDefault === false });
+$('#menu-btn').onclick = () => (document.body.classList.contains('side-auto') ? document.body.classList.toggle('side-peek') : save({ sidebarDefault: settings.sidebarDefault === false }));
 
 // Google Takeout subscriptions.csv: "Channel Id,Channel Url,Channel Title"
 function parseCsv(text) {
@@ -137,7 +142,11 @@ function settingRow(it) {
     case 'range': {
       row.innerHTML = `${lab}<input type="range" min="${it.min}" max="${it.max}" step="${it.step}" value="${val}"><span class="rv">${val}${esc(it.unit || '')}</span>`;
       const el = row.querySelector('input'), rv = row.querySelector('.rv');
-      el.addEventListener('input', () => { rv.textContent = el.value + (it.unit || ''); if (it.key.startsWith('sub')) { settings[it.key] = +el.value; applyCueStyle(); updateCuePreview(); } });
+      el.addEventListener('input', () => {
+        rv.textContent = el.value + (it.unit || '');
+        if (it.key.startsWith('sub')) { settings[it.key] = +el.value; applyCueStyle(); updateCuePreview(); }
+        else if (LIVE_LAYOUT.has(it.key)) { settings[it.key] = +el.value; applyLayout(); } // preview sizes while dragging
+      });
       bind(el, 'change', (e) => +e.value); break;
     }
     case 'color': row.innerHTML = `${lab}<input type="color" value="${esc(val)}">`; bind(row.querySelector('input'), 'change', (e) => e.value); break;
@@ -188,17 +197,18 @@ document.addEventListener('click', (e) => {
 
 // ---------- cards / grids ----------
 function card(v, opts = {}) {
-  const prog = lsGet('progress', {})[v.id];
+  // Watched progress: what this app remembers, or YouTube's own resume position when signed in.
+  const prog = Math.max(lsGet('progress', {})[v.id]?.pct || 0, v.watchedPct || 0);
   const el = document.createElement('div');
   el.className = 'card' + (isWatched(v.id) && opts.dim ? ' watched' : '');
-  el.innerHTML = `<div class="th"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${prog ? `<div class="bar" style="width:${Math.min(100, prog.pct)}%"></div>` : ''}${isWatched(v.id) && opts.dim ? '<span class="wbadge">Watched</span>' : ''}</div>
+  el.innerHTML = `<div class="th${prog > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${prog > 1 ? `<div class="bar" style="width:${Math.min(100, prog)}%"></div>` : ''}${isWatched(v.id) && opts.dim ? '<span class="wbadge">Watched</span>' : ''}</div>
     <div class="ci"><h3>${esc(v.title)}</h3><div class="meta">${v.channelId ? `<a data-ch="${esc(v.channelId)}">${esc(v.channel)}</a>` : esc(v.channel)}<br>${esc([v.views, v.published].filter(Boolean).join(' • '))}</div></div>`;
   if (opts.actions) {
     const w = isWatched(v.id), qa = document.createElement('div'); qa.className = 'qa';
-    qa.innerHTML = `<button data-q="later" title="Watch later">⏱</button><button data-q="watched" title="${w ? 'Mark unwatched' : 'Mark watched'}">${w ? '↺' : '✓'}</button>`;
+    qa.innerHTML = `<button data-q="later" title="Watch later">${ic('clock')}</button><button data-q="watched" title="${w ? 'Mark unwatched' : 'Mark watched'}">${ic(w ? 'undo' : 'check')}</button>`;
     qa.onclick = (e) => {
       e.stopPropagation(); const b = e.target.closest('button'); if (!b) return;
-      if (b.dataset.q === 'later') { pushList('watchlater', v); b.textContent = '✓'; }
+      if (b.dataset.q === 'later') { pushList('watchlater', v); b.innerHTML = ic('check'); }
       else { setWatched(v.id, !isWatched(v.id)); if (view === 'subs') renderSubs(); }
     };
     el.querySelector('.th').appendChild(qa);
@@ -219,7 +229,7 @@ function renderVideos(list, target = grid, opts = {}) {
   for (const v of list) { if (seen.has(v.id)) continue; seen.add(v.id); target.appendChild(card(v, { queue: list, ...opts })); }
 }
 const setStatus = (t) => (status.textContent = t || '');
-function showMain() { $('#watch').hidden = true; $('#main').hidden = false; $('#subbox').hidden = true; $('#filters').hidden = true; grid.hidden = false; }
+function showMain() { $('#watch').hidden = true; $('#main').hidden = false; $('#subbox').hidden = true; $('#filters').hidden = true; grid.hidden = false; syncSideAuto(); }
 async function guarded(label, fn) { setStatus(`Loading ${label}…`); try { await fn(); setStatus(''); } catch (e) { setStatus('Error: ' + e.message); } }
 
 // ---------- views ----------
@@ -319,8 +329,8 @@ async function openChannel(id) {
     const c = await api.channel(id);
     const h = document.createElement('div');
     h.className = 'channel-head';
-    h.innerHTML = `<img src="${esc(c.avatar)}"><div><h2>${esc(c.name)}</h2><button>${isSub(id) ? '✓ Subscribed' : '＋ Subscribe'}</button></div>`;
-    h.querySelector('button').onclick = async (e) => { await setSub({ id, name: c.name, avatar: c.avatar }); e.target.textContent = isSub(id) ? '✓ Subscribed' : '＋ Subscribe'; };
+    h.innerHTML = `<img src="${esc(c.avatar)}"><div><h2>${esc(c.name)}</h2><button>${isSub(id) ? '✓ Subscribed' : 'Subscribe'}</button></div>`;
+    h.querySelector('button').onclick = async (e) => { await setSub({ id, name: c.name, avatar: c.avatar }); e.target.textContent = isSub(id) ? '✓ Subscribed' : 'Subscribe'; };
     grid.appendChild(h); renderVideos(c.videos);
   });
 }
@@ -330,12 +340,12 @@ function showList(key, title) {
   if (!list.length) return setStatus(`${title} is empty.`);
   renderVideos(list);
 }
-const DL_ICON = { video: '⬇', audio: '♫', subs: 'CC', playlist: '☰' };
+const DL_ICON = { video: 'download', audio: 'music', subs: 'cc', playlist: 'list' };
 function paintDl(el, x) {
   const running = x.state === 'downloading' || x.state === 'starting', pct = Math.max(0, Math.min(100, x.pct || 0));
   const prog = x.kind === 'playlist' && x.total ? `item ${x.item} of ${x.total} — ${pct}%` : `${pct}%`;
   const st = running ? (x.state === 'starting' ? 'Starting…' : 'Downloading ' + prog) : x.state === 'done' ? 'Finished' : x.state === 'cancelled' ? 'Cancelled' : 'Failed' + (x.error ? ': ' + x.error.replace(/^ERROR:\s*/, '').slice(0, 160) : '');
-  el.innerHTML = `<div class="top"><span class="t" title="${esc(x.title)}">${DL_ICON[x.kind] || '⬇'}  ${esc(x.title)}</span>${running ? '<button data-a="cancel">Cancel</button>' : ''}${x.file && x.state === 'done' ? '<button data-a="show">Show in folder</button>' : ''}${!running ? '<button data-a="rm">Remove</button>' : ''}</div>
+  el.innerHTML = `<div class="top"><span class="t" title="${esc(x.title)}">${ic(DL_ICON[x.kind] || 'download')} ${esc(x.title)}</span>${running ? '<button data-a="cancel">Cancel</button>' : ''}${x.file && x.state === 'done' ? '<button data-a="show">Show in folder</button>' : ''}${!running ? '<button data-a="rm">Remove</button>' : ''}</div>
     <div class="pbar"><i style="width:${running || x.state === 'done' ? pct : 0}%"></i></div><div class="st">${esc(st)}${x.file ? ' • ' + esc(x.file.split('/').pop()) : ''}</div>`;
   el.querySelector('[data-a=cancel]')?.addEventListener('click', () => api.cancelDownload(x.key));
   el.querySelector('[data-a=show]')?.addEventListener('click', () => api.showFile(x.file));
@@ -460,7 +470,8 @@ function subRow(v, queueList) {
   const el = document.createElement('div');
   const w = isWatched(v.id);
   el.className = 'subrow' + (w ? ' watched' : '');
-  el.innerHTML = `<div class="th"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}</div>
+  const pr = Math.max(lsGet('progress', {})[v.id]?.pct || 0, v.watchedPct || 0);
+  el.innerHTML = `<div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}</div>
     <div class="info"><h3>${esc(v.title)}</h3><div class="meta"><a class="linkish" data-ch="${esc(v.channelId)}">${esc(v.channel)}</a> • ${esc([v.views, v.published].filter(Boolean).join(' • '))}</div>
     <div class="acts"><button data-a="watch">${w ? 'Mark unwatched' : 'Mark watched'}</button><button data-a="later">Watch later</button></div></div>`;
   const play = () => { queue = queueList; openVideo(v); };
@@ -572,6 +583,8 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('#search-wrap')) $('#suggest').hidden = true;
   if (!e.target.closest('#tool-menu') && !e.target.closest('#add-tool') && !e.target.closest('[data-id=saveplaylist]')) $('#tool-menu').hidden = true;
   if (!e.target.closest('.popover') && !e.target.closest('#acct-btn')) $('#acct-menu').hidden = true;
+  if (!e.target.closest('#p-menu') && !e.target.closest('#p-gear')) { $('#p-menu').hidden = true; $('#p-gear').classList.remove('open'); }
+  if (!e.target.closest('#side') && !e.target.closest('#menu-btn')) document.body.classList.remove('side-peek');
 });
 
 // ---------- subscriptions / lists ----------
@@ -601,35 +614,37 @@ const inList = (key, id) => lsGet(key, []).some((x) => x.id === id);
 
 // ---------- customizable player toolbar ----------
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
-const DEFAULT_TOOLBAR = ['quality', 'speed', 'captions', 'loop', 'theater', 'pip', 'mini', 'watchlater', 'dlvideo', 'dlaudio', 'dlmenu', 'close'];
+// Quality, speed and captions live in the player's own settings menu (the slider button on the video).
+const DEFAULT_TOOLBAR = ['loop', 'theater', 'pip', 'mini', 'watchlater', 'dlvideo', 'dlaudio', 'dlmenu', 'sleep', 'close'];
 const watchUrl = (t) => `https://www.youtube.com/watch?v=${current.id}${t ? '&t=' + Math.floor(video.currentTime) : ''}`;
 const TOOLS = {
-  quality: { label: 'Quality', select: RES, value: () => settings.quality || 'auto', change: (v) => { save({ quality: v }); if (current) loadStream(current.id, v, video.currentTime); } },
-  speed: { label: 'Speed', select: SPEEDS.map((s) => [String(s), s + 'x']), value: () => String(speed), change: (v) => setSpeed(parseFloat(v)) },
-  loop: { icon: '🔁', label: 'Loop', on: () => video.loop, run: () => { video.loop = !video.loop; } },
-  theater: { icon: '▭', label: 'Theater mode (T)', on: () => !!settings.theater, run: () => save({ theater: !settings.theater }) },
-  pip: { icon: '⧉', label: 'Picture in picture', run: () => (document.pictureInPictureElement ? document.exitPictureInPicture() : video.requestPictureInPicture().catch(() => {})) },
-  mini: { icon: '▫', label: 'Mini player', run: () => api.mini(true) },
-  watchlater: { icon: '⏱', label: 'Watch later', on: () => current && inList('watchlater', current.id), run: () => toggleList('watchlater', current) },
-  subscribe: { icon: '＋', label: 'Subscribe', on: () => current && isSub(current.channelId), run: () => current.channelId && setSub({ id: current.channelId, name: current.channel, avatar: current.channelThumb || '' }) },
-  captions: { label: 'Captions', select: () => [['', capTracks.length ? 'CC off' : 'CC: none'], ...capTracks.map((t) => [t.lang + (t.auto ? '|a' : '|m'), t.name])], value: () => capLang, change: (v) => chooseCaption(v) },
-  saveplaylist: { icon: '➕', label: 'Save to playlist', run: async () => {
+  quality: { icon: 'sliders', label: 'Quality', select: RES, value: () => settings.quality || 'auto', change: (v) => { save({ quality: v }); if (current) loadStream(current.id, v, video.currentTime); } },
+  speed: { icon: 'sliders', label: 'Speed', select: SPEEDS.map((s) => [String(s), s + 'x']), value: () => String(speed), change: (v) => setSpeed(parseFloat(v)) },
+  loop: { icon: 'repeat', label: 'Loop', on: () => video.loop, run: () => { video.loop = !video.loop; } },
+  theater: { icon: 'theater', label: 'Theater mode (T)', on: () => !!settings.theater, run: () => save({ theater: !settings.theater }) },
+  pip: { icon: 'pip', label: 'Picture in picture', run: () => (document.pictureInPictureElement ? document.exitPictureInPicture() : video.requestPictureInPicture().catch(() => {})) },
+  mini: { icon: 'mini', label: 'Mini player', run: () => api.mini(true) },
+  watchlater: { icon: 'clock', label: 'Watch later', on: () => current && inList('watchlater', current.id), run: () => toggleList('watchlater', current) },
+  subscribe: { icon: 'plus', label: 'Subscribe', on: () => current && isSub(current.channelId), run: () => current.channelId && setSub({ id: current.channelId, name: current.channel, avatar: current.channelThumb || '' }) },
+  captions: { icon: 'cc', label: 'Captions', select: () => [['', capTracks.length ? 'CC off' : 'CC: none'], ...capTracks.map((t) => [t.lang + (t.auto ? '|a' : '|m'), t.name])], value: () => capLang, change: (v) => chooseCaption(v) },
+  saveplaylist: { icon: 'listplus', label: 'Save to playlist', run: async () => {
     if (!signedIn()) return promptLogin('Sign in to save videos to your playlists.');
     try { const pls = await api.mePlaylists(); showMenu(pls.length ? pls.map((p) => ({ label: p.title, fn: () => api.addToPlaylist(p.id, current.id).then(() => toast('Added to ' + p.title), (e) => toast('Failed: ' + e.message)) })) : [{ label: 'No playlists found' }]); }
     catch (e) { toast('Could not load playlists: ' + e.message); }
   } },
-  dlvideo: { icon: '⬇', label: 'Download video (your settings)', run: () => startDownload('video') },
-  dlmenu: { icon: '⬇▾', label: 'Download with a preset…', run: () => showMenu([{ label: 'Video (your settings)', fn: () => startDownload('video') }, { label: 'Audio (your settings)', fn: () => startDownload('audio') }, ...DL_PRESETS.map(([label, kind, o]) => ({ label, fn: () => startDownload(kind, o) }))]) },
-  dlaudio: { icon: '♫', label: 'Download audio (your settings)', run: () => startDownload('audio') },
-  copylink: { icon: '🔗', label: 'Copy link', run: () => api.copy(watchUrl()) },
-  copytime: { icon: '🕒', label: 'Copy link at current time', run: () => api.copy(watchUrl(true)) },
-  openweb: { icon: '↗', label: 'Open on youtube.com', run: () => api.openExternal(watchUrl()) },
-  back10: { icon: '⏪', label: 'Back 10s', run: () => (video.currentTime -= 10) },
-  fwd10: { icon: '⏩', label: 'Forward 10s', run: () => (video.currentTime += 10) },
-  next: { icon: '⏭', label: 'Next video', run: () => playNext() },
-  mute: { icon: '🔇', label: 'Mute', on: () => video.muted, run: () => { video.muted = !video.muted; } },
-  audioonly: { icon: '🎧', label: 'Audio only', on: () => settings.quality === 'audio', run: () => TOOLS.quality.change(settings.quality === 'audio' ? 'auto' : 'audio') },
-  close: { icon: '✕', label: 'Close player (Esc)', run: () => { video.pause(); showMain(); } },
+  dlvideo: { icon: 'download', label: 'Download video (your settings)', run: () => startDownload('video') },
+  dlmenu: { icon: 'downloadmore', label: 'Download with a preset…', run: () => showMenu([{ label: 'Video (your settings)', fn: () => startDownload('video') }, { label: 'Audio (your settings)', fn: () => startDownload('audio') }, ...DL_PRESETS.map(([label, kind, o]) => ({ label, fn: () => startDownload(kind, o) }))]) },
+  dlaudio: { icon: 'music', label: 'Download audio (your settings)', run: () => startDownload('audio') },
+  copylink: { icon: 'link', label: 'Copy link', run: () => api.copy(watchUrl()) },
+  copytime: { icon: 'clock', label: 'Copy link at current time', run: () => api.copy(watchUrl(true)) },
+  openweb: { icon: 'external', label: 'Open on youtube.com', run: () => api.openExternal(watchUrl()) },
+  back10: { icon: 'rewind', label: 'Back 10s', run: () => (video.currentTime -= 10) },
+  fwd10: { icon: 'forward', label: 'Forward 10s', run: () => (video.currentTime += 10) },
+  next: { icon: 'next', label: 'Next video', run: () => playNext() },
+  mute: { icon: 'mute', label: 'Mute', on: () => video.muted, run: () => { video.muted = !video.muted; } },
+  audioonly: { icon: 'headphones', label: 'Audio only', on: () => settings.quality === 'audio', run: () => TOOLS.quality.change(settings.quality === 'audio' ? 'auto' : 'audio') },
+  sleep: { icon: 'moon', label: 'Sleep timer', on: () => !!sleepEnd || sleepEnding, badge: () => (sleepEnd ? Math.ceil((sleepEnd - Date.now()) / 60000) + 'm' : sleepEnding ? 'end' : ''), run: () => showMenu(SLEEP_OPTS.map(([v, l]) => ({ label: l, icon: 'moon', fn: () => setSleep(v) }))) },
+  close: { icon: 'x', label: 'Close player (Esc)', run: () => { video.pause(); showMain(); } },
 };
 const toolIds = () => (settings.toolbar || DEFAULT_TOOLBAR).filter((id) => TOOLS[id]);
 function makeTool(id) {
@@ -639,7 +654,9 @@ function makeTool(id) {
     el.innerHTML = (typeof t.select === 'function' ? t.select() : t.select).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
     el.value = t.value(); el.onchange = () => t.change(el.value);
   } else {
-    el = document.createElement('button'); el.title = t.label; el.textContent = t.icon;
+    el = document.createElement('button'); el.title = t.label;
+    const badge = t.badge?.() || '';
+    el.innerHTML = ic(t.icon) + (settings.toolLabels ? `<span class="lbl">${esc(t.label.replace(/\s*\(.*\)/, ''))}</span>` : '') + (badge ? `<span class="badge">${esc(badge)}</span>` : '');
     if (t.on?.()) el.classList.add('on');
     el.onclick = () => { if (!editingTools) Promise.resolve(t.run()).finally(renderToolbar); };
   }
@@ -671,20 +688,20 @@ function renderToolbar() {
   wrap.classList.toggle('editing', editingTools);
   tools.innerHTML = ''; ctl.innerHTML = '';
   for (const id of toolIds()) tools.appendChild(makeTool(id));
-  const btn = (txt, title, fn, id) => { const b = document.createElement('button'); b.textContent = txt; b.title = title; if (id) b.id = id; b.onclick = fn; ctl.appendChild(b); };
+  const btn = (html, title, fn, id) => { const b = document.createElement('button'); b.innerHTML = html; b.title = title; if (id) b.id = id; b.onclick = fn; ctl.appendChild(b); };
   if (editingTools) {
-    btn('＋ Add', 'Add a button', (e) => { e.stopPropagation(); openToolMenu(); }, 'add-tool');
+    btn(ic('plus') + 'Add', 'Add a button', (e) => { e.stopPropagation(); openToolMenu(); }, 'add-tool');
     btn('Reset', 'Restore default buttons', () => save({ toolbar: null }));
     btn('Done', 'Finish editing', () => { editingTools = false; renderToolbar(); });
   } else {
-    if (!settings.toolbarHidden) btn('✎', 'Edit buttons', () => { editingTools = true; renderToolbar(); });
-    btn(settings.toolbarHidden ? '⌄ Buttons' : '⌃', settings.toolbarHidden ? 'Show toolbar' : 'Hide toolbar', () => save({ toolbarHidden: !settings.toolbarHidden }));
+    if (!settings.toolbarHidden) btn(ic('edit') + 'Customize', 'Customize buttons', () => { editingTools = true; renderToolbar(); });
+    btn(settings.toolbarHidden ? ic('chevdown') + 'Buttons' : ic('chevup'), settings.toolbarHidden ? 'Show toolbar' : 'Hide toolbar', () => save({ toolbarHidden: !settings.toolbarHidden }));
   }
 }
 function showMenu(items) {
   const menu = $('#tool-menu'); menu.innerHTML = '';
   for (const it of items) {
-    const li = document.createElement('li'); li.textContent = it.label;
+    const li = document.createElement('li'); li.innerHTML = (it.icon ? ic(it.icon) : '') + esc(it.label);
     if (it.fn) li.onclick = () => { menu.hidden = true; it.fn(); }; else li.className = 'empty';
     menu.appendChild(li);
   }
@@ -692,7 +709,7 @@ function showMenu(items) {
 }
 function openToolMenu() {
   const have = new Set(toolIds()), avail = Object.keys(TOOLS).filter((id) => !have.has(id));
-  showMenu(avail.length ? avail.map((id) => ({ label: `${TOOLS[id].icon || '▾'}  ${TOOLS[id].label}`, fn: () => save({ toolbar: [...toolIds(), id] }) })) : [{ label: 'All buttons are on the toolbar' }]);
+  showMenu(avail.length ? avail.map((id) => ({ label: TOOLS[id].label, icon: TOOLS[id].icon, fn: () => save({ toolbar: [...toolIds(), id] }) })) : [{ label: 'All buttons are on the toolbar' }]);
 }
 
 // ---------- player ----------
@@ -738,14 +755,14 @@ setInterval(() => { if (audioActive && !video.paused) syncAudio(false); }, 1000)
 function updateChannelRow() {
   if (!current) return;
   const subbed = isSub(current.channelId);
-  $('#w-sub').textContent = subbed ? '✓ Subscribed' : '＋ Subscribe';
+  $('#w-sub').textContent = subbed ? '✓ Subscribed' : 'Subscribe';
   $('#w-sub').classList.toggle('on', subbed);
 }
 $('#w-sub').onclick = async () => { await TOOLS.subscribe.run(); updateChannelRow(); renderToolbar(); };
 
 async function openVideo(v) {
-  current = v; segments = [];
-  $('#main').hidden = true; $('#watch').hidden = false; $('#watch').scrollTop = 0;
+  current = v; segments = []; streamRetries = 0;
+  $('#main').hidden = true; $('#watch').hidden = false; $('#watch').scrollTop = 0; syncSideAuto();
   $('#w-title').textContent = v.title;
   $('#w-ch').textContent = v.channel || ''; $('#w-subs').textContent = ''; $('#r-likes').textContent = ''; $('#r-dislikes').textContent = ''; updateRateButtons(); $('#w-avatar').removeAttribute('src');
   $('#w-stats').textContent = [v.views, v.published].filter(Boolean).join(' • ');
@@ -913,12 +930,20 @@ $('#c-post').onclick = async () => {
 
 // ---------- subtitles (fetched through yt-dlp) ----------
 let capTracks = [], capLang = '';
+// YouTube's auto captions carry positioning (left-aligned, pinned to the edge) and per-word timing tags that render
+// as grey "not yet spoken" text. Strip both so captions are centered and uniform.
+function cleanVtt(v) {
+  return v.replace(/(-->\s*[\d:.]+)[^\n]*/g, '$1')
+    .replace(/<\d{1,2}:\d{2}(?::\d{2})?\.\d{3}>/g, '')
+    .replace(/<\/?c(\.[\w-]+)?>/g, '');
+}
 function setCaptionTrack(vtt) {
   video.querySelectorAll('track').forEach((t) => t.remove());
   if (!vtt) return;
   const t = document.createElement('track');
   t.kind = 'subtitles'; t.label = 'Captions'; t.default = true;
-  t.src = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+  t.src = URL.createObjectURL(new Blob([cleanVtt(vtt)], { type: 'text/vtt' }));
+  t.addEventListener('load', () => { for (const c of t.track.cues || []) { c.snapToLines = true; c.line = 'auto'; c.position = 'auto'; c.size = 100; c.align = 'center'; } });
   video.appendChild(t); t.track.mode = 'showing';
 }
 async function loadCaptionList(id) {
@@ -942,7 +967,7 @@ async function chooseCaption(val) {
 async function refreshAuth() { try { auth = await api.authStatus(); } catch {} updateAuthUI(); }
 function updateAuthUI() {
   const a = auth.accounts.find((x) => x.id === auth.active), b = $('#acct-btn');
-  b.innerHTML = a?.avatar ? `<img src="${esc(a.avatar)}" style="width:28px;height:28px;border-radius:50%;vertical-align:middle">` : '👤';
+  b.innerHTML = a?.avatar ? `<img src="${esc(a.avatar)}">` : ic('user');
   b.title = a ? a.name : 'Sign in';
 }
 async function onAccountChanged() {
@@ -981,7 +1006,7 @@ async function buildAcctMenu() {
     row(`${a.avatar ? `<img src="${esc(a.avatar)}">` : '<img>'}<span class="t">${esc(a.name)}<small>${a.id === auth.active ? 'Signed in' : 'Switch to this account'}${a.channel ? ' • ' + esc(a.channel) : ''}</small></span>${a.id === auth.active ? '✓' : ''}`,
       async () => { if (a.id !== auth.active) { await api.authSwitch(a.id); m.hidden = true; onAccountChanged(); } }, a.id === auth.active ? 'sel' : '');
   }
-  row('<span class="t">＋ Add another account</span>', () => { m.hidden = true; startLogin(); });
+  row('<span class="t">Add another account</span>', () => { m.hidden = true; startLogin(); });
   if (signedIn()) {
     const chHead = document.createElement('h4'); chHead.textContent = 'Channels on this account'; m.appendChild(chHead);
     const holder = document.createElement('div'); holder.innerHTML = '<div class="hint">Loading…</div>'; m.appendChild(holder);
@@ -1033,7 +1058,14 @@ video.addEventListener('timeupdate', () => {
   }
   api.sendState({ src: video.currentSrc, audio: audioActive ? audio.currentSrc : null, time: video.currentTime, playing: !video.paused });
 });
-video.addEventListener('ended', () => { if (!video.loop && settings.autoplayNext !== false) playNext(); });
+// If the stream drops (an expired link, a network change), fetch a fresh one once and carry on from the same spot.
+let streamRetries = 0;
+video.addEventListener('error', () => {
+  if (!current || streamRetries >= 1 || !video.currentSrc) return;
+  streamRetries++; toast('Reconnecting…');
+  loadStream(current.id, settings.quality || 'auto', video.currentTime || 0).catch(() => {});
+});
+video.addEventListener('ended', () => { if (sleepEnding) return fireSleep(); if (!video.loop && settings.autoplayNext !== false) playNext(); });
 // The main process needs to know whether something is playing (for the mini player's open-on-minimize option).
 for (const ev of ['play', 'pause']) video.addEventListener(ev, () => api.sendState({ src: video.currentSrc, audio: audioActive ? audio.currentSrc : null, time: video.currentTime, playing: !video.paused }));
 function playNext() {
@@ -1055,6 +1087,76 @@ if (navigator.mediaSession) {
   navigator.mediaSession.setActionHandler('nexttrack', playNext);
   navigator.mediaSession.setActionHandler('previoustrack', () => (video.currentTime = 0));
 }
+
+// ---------- in-player settings menu (quality, speed, subtitles, sleep timer, buffer) ----------
+const SLEEP_OPTS = [['0', 'Off'], ['15', '15 minutes'], ['30', '30 minutes'], ['45', '45 minutes'], ['60', '1 hour'], ['90', '1.5 hours'], ['120', '2 hours'], ['end', 'End of this video']];
+const BUFFER_OPTS = [['15', '15 seconds'], ['30', '30 seconds'], ['60', '1 minute'], ['120', '2 minutes'], ['300', '5 minutes']];
+let sleepEnd = 0, sleepEnding = false, sleepTimer = null, sleepVol = null, sleepShown = -1;
+function sleepLabel() { return sleepEnding ? 'End of video' : sleepEnd ? Math.ceil((sleepEnd - Date.now()) / 60000) + ' min left' : 'Off'; }
+function restoreSleepVolume() { if (sleepVol != null) { video.volume = sleepVol; sleepVol = null; } }
+function clearSleep() { clearInterval(sleepTimer); sleepTimer = null; sleepEnd = 0; sleepEnding = false; sleepShown = -1; }
+function setSleep(v) {
+  clearSleep(); restoreSleepVolume();
+  if (v === 'end') { sleepEnding = true; toast('Sleep timer: stops when this video ends'); }
+  else if (+v > 0) { sleepEnd = Date.now() + +v * 60000; sleepTimer = setInterval(sleepTick, 1000); toast(`Sleep timer set for ${v} minutes`); }
+  else toast('Sleep timer off');
+  renderToolbar(); if (!$('#p-menu').hidden) renderPMenu();
+}
+function fireSleep() {
+  clearSleep(); video.pause(); restoreSleepVolume(); renderToolbar();
+  toast('Sleep timer: paused');
+  if (settings.sleepAction === 'quit') api.quit();
+}
+function sleepTick() {
+  const left = sleepEnd - Date.now(), fade = (+settings.sleepFade || 0) * 1000;
+  if (fade && left > 0 && left < fade) { if (sleepVol == null) sleepVol = video.volume; video.volume = Math.max(0, sleepVol * (left / fade)); }
+  if (left <= 0) return fireSleep();
+  const m = Math.ceil(left / 60000);
+  if (m !== sleepShown) { sleepShown = m; renderToolbar(); }
+}
+let pmPage = 'main';
+const optLabel = (opts, v) => (opts.find(([k]) => String(k) === String(v)) || [0, v])[1];
+function pmRows() {
+  return {
+    quality: { title: 'Quality', value: () => optLabel(RES, settings.quality || 'auto'), opts: () => RES, cur: () => settings.quality || 'auto', pick: (v) => TOOLS.quality.change(v) },
+    speed: { title: 'Speed', value: () => speed + 'x', opts: () => TOOLS.speed.select, cur: () => String(speed), pick: (v) => setSpeed(parseFloat(v)) },
+    captions: { title: 'Subtitles', value: () => (capLang ? optLabel(TOOLS.captions.select(), capLang) : capTracks.length ? 'Off' : 'None'), opts: () => TOOLS.captions.select(), cur: () => capLang, pick: (v) => chooseCaption(v), footer: ['Subtitle settings…', () => { sTab = 'subtitles'; openSettings(); }] },
+    sleep: { title: 'Sleep timer', value: sleepLabel, opts: () => SLEEP_OPTS, cur: () => (sleepEnding ? 'end' : sleepEnd ? '' : '0'), pick: (v) => setSleep(v) },
+    buffer: { title: 'Buffer', value: () => (settings.bufferProxy === false ? 'Browser default' : optLabel(BUFFER_OPTS, settings.bufferSeconds || 60)), opts: () => BUFFER_OPTS, cur: () => String(settings.bufferSeconds || 60), pick: (v) => save({ bufferSeconds: +v, bufferProxy: true }) },
+  };
+}
+function renderPMenu() {
+  const m = $('#p-menu'), rows = pmRows(); m.innerHTML = '';
+  const row = (html, fn, cls = '') => { const d = document.createElement('div'); d.className = 'pr ' + cls; d.innerHTML = html; d.onclick = (e) => { e.stopPropagation(); fn(); }; m.appendChild(d); };
+  if (pmPage === 'main') {
+    for (const [k, r] of Object.entries(rows)) row(`${esc(r.title)}<span class="v">${esc(r.value())}${ic('chevright')}</span>`, () => { pmPage = k; renderPMenu(); });
+    row(`Audio only<span class="v">${settings.quality === 'audio' ? ic('check') : ''}</span>`, () => { TOOLS.audioonly.run(); $('#p-menu').hidden = true; $('#p-gear').classList.remove('open'); });
+    return;
+  }
+  const r = rows[pmPage];
+  row(`${ic('chevleft')}${esc(r.title)}`, () => { pmPage = 'main'; renderPMenu(); }, 'head');
+  const cur = String(r.cur());
+  for (const [v, l] of r.opts()) row(`<span class="ck">${String(v) === cur ? ic('check') : ''}</span>${esc(l)}`, () => { Promise.resolve(r.pick(v)); pmPage = 'main'; $('#p-menu').hidden = true; $('#p-gear').classList.remove('open'); });
+  if (r.footer) row(esc(r.footer[0]), () => { $('#p-menu').hidden = true; $('#p-gear').classList.remove('open'); r.footer[1](); });
+}
+$('#p-gear').onclick = (e) => {
+  e.stopPropagation(); const m = $('#p-menu'); m.hidden = !m.hidden;
+  $('#p-gear').classList.toggle('open', !m.hidden);
+  if (!m.hidden) { pmPage = 'main'; renderPMenu(); }
+};
+
+// ---------- sidebar: drag to resize, auto-hide while watching ----------
+function syncSideAuto() {
+  const on = settings.sidebarAutoHide === 'watch' && !$('#watch').hidden;
+  document.body.classList.toggle('side-auto', on);
+  if (!on) document.body.classList.remove('side-peek');
+}
+$('#side-resizer').addEventListener('mousedown', (e) => {
+  e.preventDefault(); const rz = $('#side-resizer'); rz.classList.add('drag'); let w = 0;
+  const move = (ev) => { w = Math.round(Math.min(420, Math.max(150, ev.clientX))); document.documentElement.style.setProperty('--side-w', w + 'px'); };
+  const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); rz.classList.remove('drag'); if (w) save({ sidebarWidth: w }); };
+  document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+});
 
 // ---------- right-click menus ----------
 const ytUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
@@ -1134,7 +1236,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 (async () => {
-  await loadSettings(); await refreshAuth();
+  paintIcons(); await loadSettings(); await refreshAuth();
   video.volume = Math.min(1, Math.max(0, (settings.defaultVolume ?? 100) / 100));
   if (signedIn()) fetchSubs().then(renderSideSubs).catch(() => {});
   const start = { subs: () => document.querySelector('#side [data-nav=subs]').click(), playlists: () => document.querySelector('#side [data-nav=playlists]').click(), history: () => document.querySelector('#side [data-nav=history]').click() }[settings.startPage];

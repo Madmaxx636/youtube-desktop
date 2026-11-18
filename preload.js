@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
   download: (id, kind, opts) => call('yt:download', id, kind, opts),
   openDownloads: () => call('app:openDownloads'),
   relaunch: () => call('app:relaunch'),
+  quit: () => call('app:quit'),
+  streamStats: () => call('dev:streamStats'),
   session: process.env.XDG_SESSION_TYPE || '',
   showFile: (p) => call('app:showFile', p),
   setZoom: (f) => webFrame.setZoomFactor(Math.min(2, Math.max(0.5, f))),

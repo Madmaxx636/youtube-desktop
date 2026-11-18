@@ -20,6 +20,7 @@ Requires `yt-dlp` and `ffmpeg`. Keep yt-dlp current: YouTube breaks old builds. 
 - SponsorBlock (per category), DeArrow, Return YouTube Dislike
 - Sign in with Google's device-code page, switch accounts and channels, notifications, like/dislike, subscribe
 - Mini player with size, screen corner, opacity, always-on-top and open-on-minimize settings; picture-in-picture; tray; media keys; global hotkey (Ctrl+Alt+Y)
+- Player settings menu on the video (quality, speed, subtitles, sleep timer, buffer), sleep timer, buffer-ahead cache
 - Customizable player buttons, theater mode, Modern and Classic (2012) skins, themes (including custom colors), interface scale, spacing, thumbnail size, sidebar and related-video layout, custom CSS
 
 All of it is configurable under Settings (gear icon).

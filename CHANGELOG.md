@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0
+
+- Subtitles are centered and plain: YouTube's left-pinned positioning and grey "not yet spoken" word styling are removed.
+- Minimal line icons everywhere instead of emoji.
+- Quality, speed, subtitles, sleep timer and buffer moved into a settings menu on the video itself (the slider button, top right of the player).
+- Larger, rounded player buttons with a size setting and optional text labels; "Customize" replaces the pencil.
+- Sleep timer (15 minutes to 2 hours, or end of video) with optional volume fade and an option to quit the app.
+- Sidebar: drag its edge to resize, and optionally hide it automatically while watching (the menu button slides it back in).
+- Buffering: streams go through a local cache that downloads ahead in steady chunks; choose 15 seconds to 5 minutes. Fixes stutters from slow or throttled connections. A dropped stream reconnects once automatically.
+- Watched progress bars on thumbnails (thicker, with a track), using YouTube's own resume positions when signed in.
+- More scaling controls: interface scale (70-200%), text size, icon size, player button size, sidebar width and related-column width.
+
 ## 0.1.2
 
 - Fix: after opening the grouped subscriptions page, it stayed on screen under every other page, so the sidebar buttons, Manage and channel pages looked dead.

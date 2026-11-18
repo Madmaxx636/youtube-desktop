@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src https: data:; media-src https: blob: data:; connect-src https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src https: data:; media-src https: blob: data: http://127.0.0.1:*; connect-src https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 <title>YouTube Desktop</title>
 <link rel="stylesheet" href="styles.css">
 <style id="custom-css"></style>
@@ -10,32 +10,35 @@
 </head>
 <body>
 <header id="top">
-  <button id="menu-btn" title="Menu">☰</button>
+  <button id="menu-btn" title="Menu"><i data-ic="menu"></i></button>
   <div id="logo" title="Home"><span class="logo-mark">▶</span><span class="logo-text">You<span class="tube">Tube</span></span></div>
   <div id="search-wrap">
     <input id="search" placeholder="Search" autocomplete="off">
-    <button id="search-btn" title="Search">🔍</button>
+    <button id="search-btn" title="Search"><i data-ic="search"></i></button>
     <ul id="suggest" hidden></ul>
   </div>
-  <button id="acct-btn" title="Sign in">👤</button>
-  <button id="settings-btn" title="Settings">⚙</button>
+  <button id="acct-btn" title="Sign in"><i data-ic="user"></i></button>
+  <button id="settings-btn" title="Settings"><i data-ic="sliders"></i></button>
 </header>
 <div id="layout">
   <nav id="side">
-    <a data-nav="home" class="active">🏠 Home</a>
-    <a data-nav="subs">📺 Subscriptions</a>
-    <a data-nav="playlists">☰ Playlists</a>
-    <a data-nav="history">🕘 History</a>
-    <a data-nav="watchlater">⏱ Watch later</a>
-    <a data-nav="downloads">⬇ Downloads</a>
+    <a data-nav="home" class="active"><i data-ic="home"></i><span>Home</span></a>
+    <a data-nav="subs"><i data-ic="subs"></i><span>Subscriptions</span></a>
+    <a data-nav="playlists"><i data-ic="list"></i><span>Playlists</span></a>
+    <a data-nav="history"><i data-ic="history"></i><span>History</span></a>
+    <a data-nav="watchlater"><i data-ic="clock"></i><span>Watch later</span></a>
+    <a data-nav="downloads"><i data-ic="download"></i><span>Downloads</span></a>
     <div id="side-subs" hidden></div>
   </nav>
+  <div id="side-resizer" title="Drag to resize"></div>
   <main id="main"><div id="filters" hidden></div><div id="subbox" hidden></div><div id="grid"></div><div id="status"></div></main>
   <section id="watch" hidden>
     <div id="player-area">
       <div id="player-box">
         <video id="video" controls autoplay></video>
         <div id="sb-toast" hidden></div>
+        <button id="p-gear" class="p-gear" title="Player settings"><i data-ic="sliders"></i></button>
+        <div id="p-menu" class="p-menu" hidden></div>
       </div>
       <div id="toolbar-wrap">
         <div id="player-tools"></div>
@@ -48,8 +51,8 @@
       <div id="w-channel-row">
         <img id="w-avatar" alt="">
         <div id="w-channel-text"><a id="w-ch"></a><span id="w-subs"></span></div>
-        <button id="w-sub">＋ Subscribe</button>
-        <span id="rate" class="chip"><button id="r-like" title="Like">👍 <span id="r-likes"></span></button><button id="r-dislike" title="Dislike">👎 <span id="r-dislikes"></span></button></span>
+        <button id="w-sub">Subscribe</button>
+        <span id="rate" class="chip"><button id="r-like" title="Like"><i data-ic="up"></i><span id="r-likes"></span></button><button id="r-dislike" title="Dislike"><i data-ic="down"></i><span id="r-dislikes"></span></button></span>
       </div>
       <div id="w-desc" class="box collapsed">
         <div id="w-stats"></div>
@@ -83,6 +86,7 @@
     <div class="s-body"><nav id="s-tabs"></nav><div id="s-pane"></div></div>
   </div>
 </div>
+<script src="icons.js"></script>
 <script src="settings-schema.js"></script>
 <script src="app.js"></script>
 </body>
