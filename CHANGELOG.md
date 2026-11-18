@@ -2,6 +2,7 @@
 
 ## 0.6.1
 
+- Windows build: an installer (YouTube-Desktop-0.6.1-Setup.exe) and a portable .exe, with yt-dlp.exe bundled. Downloads that merge video and audio, and MP3 conversion, still need ffmpeg on PATH.
 - New default player look, "Modern", matching YouTube's current bar: a thin full-width timeline with a blue dot, play and volume on the left with the time in a rounded pill, and on the right an autoplay switch, theater, captions, sleep timer, a quality gear that shows HD / 2K / 4K for the current stream, the ⋮ menu and full screen. Round, larger icons.
 - The autoplay switch in the bar turns Autoplay on or off (and can be hidden in Settings, Appearance). The buttons now default to the right side; "Next to the volume" is still a choice.
 - The earlier "YouTube" red look is still available as a theme.

@@ -14,7 +14,8 @@ const jobs = new Map();
 let playerPlaying = false;
 // Prefer a user-installed, up-to-date yt-dlp: distro packages go stale and YouTube breaks them.
 const localYtdlp = path.join(require('os').homedir(), '.local', 'bin', 'yt-dlp');
-const YTDLP = fs.existsSync(localYtdlp) ? localYtdlp : 'yt-dlp';
+const bundledYtdlp = path.join(process.resourcesPath || '', 'yt-dlp.exe'); // shipped inside the Windows build
+const YTDLP = process.platform === 'win32' && fs.existsSync(bundledYtdlp) ? bundledYtdlp : fs.existsSync(localYtdlp) ? localYtdlp : 'yt-dlp';
 let quitting = false;
 
 const store = {

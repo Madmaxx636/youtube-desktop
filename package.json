@@ -70,6 +70,39 @@
     },
     "appImage": {
       "artifactName": "YouTube-Desktop-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.png",
+      "extraResources": [
+        {
+          "from": "build/win/yt-dlp.exe",
+          "to": "yt-dlp.exe"
+        }
+      ],
+      "artifactName": "YouTube-Desktop-${version}-Setup.${ext}",
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "YouTube-Desktop-${version}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "YouTube-Desktop-${version}-Portable.${ext}"
     }
   },
   "desktopName": "youtube-desktop.desktop"
