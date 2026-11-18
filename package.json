@@ -9,11 +9,68 @@
   },
   "license": "MIT",
   "dependencies": {
-    "electron": "^45.3.4",
-    "hls.js": "^1.7.4",
     "youtubei.js": "^18.3.0"
   },
   "devDependencies": {
+    "electron": "^45.3.4",
     "electron-builder": "^26.18.0"
-  }
+  },
+  "author": {
+    "name": "Lane",
+    "email": "noreply@youtube-desktop.invalid"
+  },
+  "homepage": "https://localhost/youtube-desktop",
+  "build": {
+    "appId": "dev.local.youtube-desktop",
+    "productName": "YouTube Desktop",
+    "copyright": "MIT",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "AudioVideo",
+      "icon": "icon.png",
+      "maintainer": "Lane <noreply@youtube-desktop.invalid>",
+      "synopsis": "Desktop YouTube client",
+      "description": "A desktop YouTube client with downloads, subtitles, a mini player and many settings. Needs yt-dlp and ffmpeg.",
+      "artifactName": "${productName}-${version}.${ext}",
+      "desktop": {
+        "entry": {
+          "Name": "YouTube Desktop",
+          "Comment": "Desktop YouTube client",
+          "Keywords": "youtube;video;music;"
+        }
+      }
+    },
+    "deb": {
+      "depends": [
+        "ffmpeg",
+        "libgtk-3-0",
+        "libnss3",
+        "libxss1",
+        "libasound2t64 | libasound2"
+      ],
+      "recommends": [
+        "yt-dlp"
+      ],
+      "artifactName": "youtube-desktop_${version}_${arch}.${ext}",
+      "packageCategory": "video"
+    },
+    "appImage": {
+      "artifactName": "YouTube-Desktop-${version}-${arch}.${ext}"
+    }
+  },
+  "desktopName": "youtube-desktop.desktop"
 }

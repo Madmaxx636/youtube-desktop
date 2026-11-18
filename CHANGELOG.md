@@ -14,3 +14,4 @@ First working version of the desktop client.
 - Mini player with size, corner, opacity and stay-on-top settings; tray, media keys, picture-in-picture
 - Customizable player buttons, theater mode, Modern and Classic skins, themes, interface scale, layout options
 - Tabbed settings panel
+- Linux packages: AppImage and .deb built with `npm run dist` (needs yt-dlp and ffmpeg at runtime)
