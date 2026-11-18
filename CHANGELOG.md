@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- Fix: after opening the grouped subscriptions page, it stayed on screen under every other page, so the sidebar buttons, Manage and channel pages looked dead.
+- Fix: channel icons did not load (YouTube returns addresses without "https:").
+- A failed DeArrow thumbnail now falls back to the original image.
+- Grouped layout: your subscriptions now live in the sidebar, with unwatched counts and a Manage link.
+- The logo click now highlights Home.
+
 ## 0.1.1
 
 - Fix: after signing in, every request failed with HTTP 400 (home, search, playback, comments, subscriptions). Public data now uses an anonymous session, and account data uses a separate session that talks to YouTube as the TV client, which is the client the sign-in token is valid for.

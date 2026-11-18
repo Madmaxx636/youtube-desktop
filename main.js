@@ -98,7 +98,7 @@ async function tvPages(i, browseId, maxPages = 3) {
   return all;
 }
 const tileLines = (t) => (t.metadata?.tileMetadataRenderer?.lines || []).map((l) => (l.lineRenderer?.items || []).map((x) => rt(x.lineItemRenderer?.text)).filter((s) => s && s !== '•'));
-const tileThumb = (t) => (t.header?.tileHeaderRenderer?.thumbnail?.thumbnails || []).slice(-1)[0]?.url || '';
+const tileThumb = (t) => fixUrl((t.header?.tileHeaderRenderer?.thumbnail?.thumbnails || []).slice(-1)[0]?.url);
 function tileVideo(t) {
   const type = t.contentType;
   if (type !== 'TILE_CONTENT_TYPE_VIDEO' && type !== 'TILE_CONTENT_TYPE_SHORTS') return null;
@@ -141,7 +141,8 @@ const txt = (t) => {
   const s = t.toString?.();
   return s && s !== '[object Object]' ? s : '';
 };
-const thumb = (a) => (a && a.length ? a[a.length - 1].url : '');
+const fixUrl = (u) => (typeof u === 'string' && u.startsWith('//') ? 'https:' + u : u || '');
+const thumb = (a) => (a && a.length ? fixUrl(a[a.length - 1].url) : '');
 
 function mapVideo(v) {
   const id = v.id || v.video_id || v.content_id;
@@ -445,7 +446,7 @@ const handlers = {
     walk(x.data);
     return items.map((it) => {
       const ds = /"datasyncIdToken":"([^"]+)"/.exec(JSON.stringify(it))?.[1] || '';
-      return { name: rt(it.accountName), handle: rt(it.channelHandle) || rt(it.accountByline), avatar: (it.accountPhoto?.thumbnails || []).slice(-1)[0]?.url || '', selected: !!it.isSelected, token: ds.includes('||') ? ds.split('||')[0] : '' };
+      return { name: rt(it.accountName), handle: rt(it.channelHandle) || rt(it.accountByline), avatar: fixUrl((it.accountPhoto?.thumbnails || []).slice(-1)[0]?.url), selected: !!it.isSelected, token: ds.includes('||') ? ds.split('||')[0] : '' };
     });
   },
   async 'auth:setChannel'(token, name) {

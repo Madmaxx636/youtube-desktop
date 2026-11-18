@@ -250,7 +250,7 @@ button.danger{color:#ff6b6b}
 .qa button:hover{background:#000}
 
 /* grouped subscriptions (2016-2018 style): full-width sections of thumbnails under date or channel headings */
-#subbox.grouped{display:block}
+#subbox.grouped:not([hidden]){display:block}
 #sg-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px}
 #sg-bar h2{margin:0 auto 0 0;font-size:20px;font-weight:600}
 #sg-bar label{display:flex;gap:6px;align-items:center;color:var(--fg2)}
@@ -277,3 +277,16 @@ button.danger{color:#ff6b6b}
 .dlbar{grid-column:1/-1;display:flex;gap:10px;margin-bottom:6px}
 
 #side a[hidden]{display:none}
+
+/* subscriptions list in the sidebar (Grouped layout) */
+#side-subs{margin-top:10px;padding-top:6px;border-top:1px solid var(--line)}
+#side-subs[hidden]{display:none}
+#side-subs h4{display:flex;justify-content:space-between;align-items:center;margin:8px 12px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--fg2)}
+#side-subs h4 a{padding:0;border-radius:0;text-transform:none;letter-spacing:0;color:var(--link);font-weight:400;font-size:12px;cursor:pointer}
+#side-subs h4 a:hover{background:none;text-decoration:underline}
+#side-subs .ss{display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:10px;cursor:pointer}
+#side-subs .ss:hover{background:var(--bg2)}
+#side-subs .ss img{width:24px;height:24px;border-radius:50%;background:var(--bg2);flex-shrink:0;object-fit:cover}
+#side-subs .ss .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#side-subs .ss .cnt{background:var(--fg2);color:var(--bg);border-radius:10px;font-size:11px;padding:0 7px}
+body.classic #side-subs{border-top-color:#d3d3d3}

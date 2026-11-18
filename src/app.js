@@ -13,6 +13,7 @@ function setWatched(ids, on) {
   const w = lsGet('watched', {});
   for (const id of [].concat(ids)) { if (on) w[id] = 1; else delete w[id]; }
   lsSet('watched', w);
+  renderSideSubs();
 }
 
 // ---------- settings ----------
@@ -76,7 +77,7 @@ function applyCueStyle() { $('#cue-css').textContent = `video::cue{${cueStyle()}
 function applySettings() {
   applyTheme(); applyLayout(); applyCueStyle();
   $('#custom-css').textContent = settings.css || '';
-  renderToolbar();
+  renderToolbar(); renderSideSubs();
   if (!$('#settings').hidden) renderSettings(true);
 }
 async function save(p) { settings = await api.setSettings(p); applySettings(); }
@@ -116,6 +117,7 @@ const ACTIONS = {
       if (/^UC[\w-]{20,}$/.test(id) && !subs[id]) { subs[id] = { id, name: (r[iName] || '').trim(), avatar: '' }; n++; }
     }
     lsSet('subs', subs); lsSet('subcache', { ts: 0, videos: [] });
+    renderSideSubs();
     alert(n ? `Imported ${n} subscriptions.` : 'No new subscriptions found in that file.');
   },
 };
@@ -221,7 +223,7 @@ function showMain() { $('#watch').hidden = true; $('#main').hidden = false; $('#
 async function guarded(label, fn) { setStatus(`Loading ${label}…`); try { await fn(); setStatus(''); } catch (e) { setStatus('Error: ' + e.message); } }
 
 // ---------- views ----------
-async function goHome() { view = 'home'; showMain(); grid.innerHTML = ''; await guarded('home', async () => {
+async function goHome() { view = 'home'; document.querySelectorAll('#side a').forEach((x) => x.classList.toggle('active', x.dataset.nav === 'home')); showMain(); grid.innerHTML = ''; await guarded('home', async () => {
   // Seed the feed from recently watched channels when we have history.
   const seeds = [...new Set(lsGet('history', []).slice(0, 6).map((v) => v.channel).filter(Boolean))];
   renderVideos(await api.home(seeds));
@@ -312,7 +314,7 @@ async function openPlaylist(id) {
   });
 }
 async function openChannel(id) {
-  showMain(); grid.innerHTML = '';
+  view = 'channel'; showMain(); grid.innerHTML = '';
   await guarded('channel', async () => {
     const c = await api.channel(id);
     const h = document.createElement('div');
@@ -396,10 +398,11 @@ async function showSubs(force) {
     return;
   }
   const cache = lsGet('subcache', { ts: 0, videos: [] });
-  renderSubs();
+  renderSubs(); renderSideSubs();
   if (force || Date.now() - cache.ts > 30 * 60 * 1000) {
     setStatus('Refreshing subscriptions…');
     try { await fetchSubs(); setStatus(''); } catch (e) { setStatus('Could not load subscriptions: ' + e.message); }
+    renderSideSubs();
     if (view === 'subs') renderSubs();
   }
 }
@@ -477,6 +480,22 @@ function subData() {
   return { cache, subs: signedIn() ? cache.channels || {} : lsGet('subs', {}), vids: cache.videos.filter((v) => !(settings.hideShorts && v.isShort)) };
 }
 function renderSubs() { if (settings.subsView === 'box') renderSubBox(); else renderSubGrouped(); }
+// In the Grouped layout the channel list lives in the left sidebar, like the 2016-2018 guide.
+function renderSideSubs() {
+  const box = $('#side-subs');
+  const { subs, vids } = subData(), list = Object.values(subs);
+  if (settings.subsView === 'box' || !list.length) { box.hidden = true; return; }
+  const unwatched = {};
+  for (const v of vids) if (v.channelId && !isWatched(v.id)) unwatched[v.channelId] = (unwatched[v.channelId] || 0) + 1;
+  list.sort((x, y) => (unwatched[y.id] || 0) - (unwatched[x.id] || 0) || (x.name || '').localeCompare(y.name || ''));
+  box.hidden = false;
+  box.innerHTML = '<h4>Subscriptions <a data-manage>Manage</a></h4>' + list.map((c) =>
+    `<a class="ss" data-c="${esc(c.id)}" title="${esc(c.name || c.id)}"><img ${c.avatar ? `src="${esc(c.avatar)}"` : ''}><span class="n">${esc(c.name || c.id)}</span>${unwatched[c.id] ? `<span class="cnt">${unwatched[c.id]}</span>` : ''}</a>`).join('');
+  box.onclick = (e) => {
+    const link = e.target.closest('a'); if (!link) return;
+    if (link.dataset.manage !== undefined) showManageSubs(); else if (link.dataset.c) openChannel(link.dataset.c);
+  };
+}
 function renderSubGrouped() {
   const { cache, subs, vids: all } = subData();
   const hide = settings.subsHideWatched !== false, by = settings.subsGroupBy === 'channel' ? 'channel' : 'date', sort = settings.subsSort || 'new';
@@ -566,6 +585,7 @@ async function setSub(ch, forceOn) {
     const s = lsGet('subs', {}); if (on) s[ch.id] = ch; else delete s[ch.id]; lsSet('subs', s);
   }
   lsSet('subcache', { ts: 0, videos: [] });
+  renderSideSubs();
 }
 function toast(msg) { const t = $('#sb-toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), 3500); }
 function pushList(key, v, max = 300) {
@@ -840,8 +860,19 @@ async function applyDeArrow(root, v) {
   const r = daPick(await daBranding(v.id), v.id); if (!r) return;
   const h = root.querySelector('h3'), img = root.querySelector('img');
   if (r.title && h) { h.title = h.textContent; h.textContent = r.title; }
-  if (r.thumb && img) img.src = r.thumb;
+  if (r.thumb && img) { img.dataset.orig = img.src; img.src = r.thumb; } // falls back to the original if DeArrow's image fails
 }
+
+// A thumbnail that fails to load falls back: DeArrow image -> original -> smaller YouTube sizes -> hidden.
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || !img.src) return;
+  if (img.dataset.orig && img.src !== img.dataset.orig) { img.src = img.dataset.orig; return; }
+  const m = /^(.*\/vi\/[\w-]{11}\/)(maxresdefault|sddefault|hqdefault|mqdefault)\.jpg/.exec(img.src);
+  if (m && m[2] !== 'mqdefault') { img.src = m[1] + (m[2] === 'hqdefault' ? 'mqdefault' : 'hqdefault') + '.jpg'; return; }
+  if (m) { img.src = m[1] + 'default.jpg'; return; }
+  img.style.visibility = 'hidden';
+}, true);
 
 // ---------- like / dislike (counts from Return YouTube Dislike) ----------
 async function loadVotes(id) {
@@ -917,7 +948,8 @@ function updateAuthUI() {
 async function onAccountChanged() {
   lsSet('subcache', { ts: 0, videos: [] }); remoteSubs = null;
   await refreshAuth();
-  if (signedIn()) fetchSubs().catch(() => {});
+  if (signedIn()) fetchSubs().then(renderSideSubs).catch(() => {});
+  renderSideSubs();
   if (view === 'subs') showSubs(true); else if (view === 'playlists') showPlaylists(); else goHome();
 }
 function startLogin(note) {
@@ -1104,7 +1136,7 @@ document.addEventListener('keydown', (e) => {
 (async () => {
   await loadSettings(); await refreshAuth();
   video.volume = Math.min(1, Math.max(0, (settings.defaultVolume ?? 100) / 100));
-  if (signedIn()) fetchSubs().catch(() => {});
+  if (signedIn()) fetchSubs().then(renderSideSubs).catch(() => {});
   const start = { subs: () => document.querySelector('#side [data-nav=subs]').click(), playlists: () => document.querySelector('#side [data-nav=playlists]').click(), history: () => document.querySelector('#side [data-nav=history]').click() }[settings.startPage];
   (start || goHome)();
 })();
