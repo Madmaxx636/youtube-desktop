@@ -7,6 +7,9 @@ const fs = require('fs');
 const { spawn, execFile } = require('child_process');
 
 let win, mini, tray, yt;
+// Test mode: nothing may appear on the user's screen (windows, tray, shortcuts, notifications, menus, browser).
+const HIDDEN = !!process.env.YT_TEST_HIDDEN;
+const showWin = (w) => { if (!HIDDEN && w && !w.isDestroyed()) w.show(); };
 const jobs = new Map();
 let playerPlaying = false;
 // Prefer a user-installed, up-to-date yt-dlp: distro packages go stale and YouTube breaks them.
@@ -88,10 +91,13 @@ function tilesOf(data) {
 }
 // Browse a TV page and follow its continuation token for a few more pages.
 async function tvPages(i, browseId, maxPages = 3) {
-  const all = [];
+  const all = [], seen = new Set();
   let res = await i.actions.execute('/browse', { browseId });
   for (let n = 0; ; n++) {
-    all.push(...tilesOf(res.data));
+    // YouTube sometimes returns the same page again for a continuation; only keep tiles we have not seen.
+    const fresh = tilesOf(res.data).filter((t) => { const k = t.contentId || rt(t.metadata?.tileMetadataRenderer?.title); if (!k || seen.has(k)) return false; seen.add(k); return true; });
+    all.push(...fresh);
+    if (n > 0 && !fresh.length) break;
     if (n + 1 >= maxPages) break;
     const tok = /"nextContinuationData":\{"continuation":"([^"]+)"/.exec(JSON.stringify(res.data))?.[1];
     if (!tok) break;
@@ -148,18 +154,18 @@ const fixUrl = (u) => (typeof u === 'string' && u.startsWith('//') ? 'https:' + 
 const thumb = (a) => (a && a.length ? fixUrl(a[a.length - 1].url) : '');
 
 function mapVideo(v) {
-  const id = v.id || v.video_id || v.content_id;
+  const id = v.id || v.video_id || v.content_id || v.on_tap_endpoint?.payload?.videoId;
   if (!id) return null;
   return {
     id,
-    title: txt(v.title) || txt(v.metadata?.title),
+    title: txt(v.title) || txt(v.metadata?.title) || txt(v.overlay_metadata?.primary_text),
     channel: txt(v.author?.name) || txt(v.short_byline_text) || '',
     channelId: v.author?.id || '',
     channelThumb: thumb(v.author?.thumbnails),
-    views: txt(v.short_view_count) || txt(v.view_count) || '',
+    views: txt(v.short_view_count) || txt(v.view_count) || txt(v.overlay_metadata?.secondary_text) || '',
     published: txt(v.published) || '',
     duration: txt(v.duration) || v.length_text?.text || '',
-    thumb: thumb(v.thumbnails) || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+    thumb: thumb(v.thumbnails) || (Array.isArray(v.thumbnail) ? thumb(v.thumbnail) : '') || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
     isShort: v.type === 'ShortsLockupView' || v.type === 'ReelItem',
     watchedPct: Number((v.thumbnail_overlays || []).find((o) => o.type === 'ThumbnailOverlayResumePlayback')?.percent_duration_watched) || 0,
   };
@@ -211,7 +217,7 @@ function mapPlaylist(p) {
 }
 function collectPlaylists(nodes, out = []) {
   for (const n of nodes || []) {
-    if (['Playlist', 'GridPlaylist'].includes(n.type) || (n.type === 'LockupView' && n.content_type === 'PLAYLIST')) { const m = mapPlaylist(n); if (m) out.push(m); }
+    if (['Playlist', 'GridPlaylist'].includes(n.type) || (n.type === 'LockupView' && (n.content_type === 'PLAYLIST' || n.content_type === 'STATION'))) { const m = mapPlaylist(n); if (m) out.push(m); }
     else { const inner = n.contents || n.items || n.content?.contents; if (Array.isArray(inner)) collectPlaylists(inner, out); }
   }
   return out;
@@ -322,7 +328,7 @@ function runJob(key, url, args, { playlist = false } = {}) {
   p.on('close', (code, sig) => {
     jobs.delete(key);
     send({ pct: code === 0 ? 100 : -1, done: true, cancelled: !!sig, error: code === 0 || sig ? '' : errText.split('\n').filter((l) => /ERROR/.test(l)).pop() || '' });
-    if (!sig && cfg().dlNotify && Notification.isSupported()) new Notification({ title: code === 0 ? 'Download complete' : 'Download finished with errors', body: playlist ? `${item} of ${total} items` : key }).show();
+    if (!sig && !HIDDEN && cfg().dlNotify && Notification.isSupported()) new Notification({ title: code === 0 ? 'Download complete' : 'Download finished with errors', body: playlist ? `${item} of ${total} items` : key }).show();
   });
   return true;
 }
@@ -427,6 +433,28 @@ async function proxied(url) {
   return `http://127.0.0.1:${proxyPort}/s/${token}`;
 }
 
+// ---------- channel helpers ----------
+const chanCache = new Map(), chanConts = new Map();
+async function getChannel(id) {
+  if (!/^UC[\w-]{22}$/.test(id || '')) throw new Error('Not a channel id.');
+  const hit = chanCache.get(id);
+  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.ch;
+  const ch = await (await innertube()).getChannel(id);
+  chanCache.set(id, { ch, at: Date.now() });
+  while (chanCache.size > 20) chanCache.delete(chanCache.keys().next().value);
+  return ch;
+}
+function mapChannelNode(n) {
+  const id = n.id || n.content_id;
+  if (!/^UC[\w-]{22}$/.test(id || '')) return null;
+  const parts = (n.metadata?.metadata?.metadata_rows || []).flatMap((r) => (r.metadata_parts || []).map((p) => txt(p.text))).filter(Boolean);
+  return {
+    id, name: txt(n.author?.name) || txt(n.title) || txt(n.metadata?.title),
+    avatar: thumb(n.author?.thumbnails) || thumb(n.thumbnails) || fixUrl(n.content_image?.image?.[0]?.url),
+    subs: txt(n.subscribers) || parts.find((p) => /subscribers?/i.test(p)) || '', handle: parts.find((p) => p.startsWith('@')) || '',
+  };
+}
+
 const handlers = {
   async 'yt:home'(seeds) {
     // Signed in: your real recommendations from the TV home page.
@@ -479,6 +507,61 @@ const handlers = {
       const cm = t.comment;
       return cm && { author: txt(cm.author?.name), text: txt(cm.content), likes: txt(cm.like_count), published: txt(cm.published_time), thumb: thumb(cm.author?.thumbnails) };
     }).filter(Boolean);
+  },
+  // ----- channel pages (desktop layout: header, tabs, shelves, sorting, paging) -----
+  async 'yt:channelInfo'(id) {
+    const ch = await getChannel(id);
+    const hc = ch.header?.content;
+    const rows = (hc?.metadata?.metadata_rows || []).map((r) => (r.metadata_parts || []).map((p) => txt(p.text))).flat();
+    const imgUrl = (x) => fixUrl((Array.isArray(x) ? x : x?.image || x?.thumbnails || []).map((t) => t.url).slice(-1)[0]);
+    const desc = typeof hc?.description?.description === 'string' ? hc.description.description : txt(hc?.description?.description);
+    return {
+      id, name: txt(hc?.title?.text) || txt(hc?.title) || txt(ch.metadata?.title),
+      handle: rows.find((x) => x.startsWith('@')) || '', subs: rows.find((x) => /subscribers?/i.test(x)) || '', videosCount: rows.find((x) => /\bvideos?\b/i.test(x)) || '',
+      avatar: (imgUrl(hc?.image?.avatar) || thumb(ch.metadata?.avatar)).replace(/=s\d+-/, '=s176-'),
+      banner: imgUrl(hc?.banner?.image || hc?.banner).replace(/=w\d+-/, '=w1707-'),
+      description: desc || ch.metadata?.description || '',
+      tabs: [...(ch.tabs || []).filter((t) => ['Home', 'Videos', 'Shorts', 'Live', 'Playlists'].includes(t)), 'About'],
+    };
+  },
+  async 'yt:channelTab'(id, tab, sort, cont) {
+    const pack = (feed, shape) => {
+      let more = null;
+      if (feed.has_continuation) { more = crypto.randomBytes(6).toString('hex'); chanConts.set(more, feed); while (chanConts.size > 30) chanConts.delete(chanConts.keys().next().value); }
+      return { ...shape(feed), more, sorts: Array.isArray(feed.filters) && feed.filters.length ? feed.filters : null };
+    };
+    const vids = (feed) => ({ videos: collectVideos(feed.videos || []) });
+    const lists = (feed) => ({ playlists: collectPlaylists(feed.playlists || feed.videos || []) });
+    if (cont) {
+      const feed = chanConts.get(cont); if (!feed) throw new Error('That list expired. Reload the tab.');
+      chanConts.delete(cont);
+      return pack(await feed.getContinuation(), tab === 'Playlists' ? lists : vids);
+    }
+    const ch = await getChannel(id);
+    const sorted = async (feed) => (sort && sort !== 'Latest' && Array.isArray(feed.filters) && feed.filters.includes(sort) ? feed.applyFilter(sort) : feed);
+    if (tab === 'Videos') return pack(await sorted(await ch.getVideos()), vids);
+    if (tab === 'Shorts') return pack(await sorted(await ch.getShorts()), vids);
+    if (tab === 'Live') return pack(await sorted(await ch.getLiveStreams()), vids);
+    if (tab === 'Playlists') return pack(await ch.getPlaylists(), lists);
+    if (tab === 'About') {
+      const m = (await ch.getAbout()).metadata || {};
+      const links = (m.links || []).map((l) => {
+        // Each link keeps its real address behind a YouTube redirect (the "q" parameter).
+        let url = l.link?.endpoint?.payload?.url || l.link?.runs?.[0]?.endpoint?.payload?.url || l.endpoint?.metadata?.url || '';
+        try { const u = new URL(url); if (u.pathname === '/redirect') url = u.searchParams.get('q') || url; } catch {}
+        return { title: txt(l.title), text: txt(l.link), url, icon: fixUrl(l.favicon?.[0]?.url) };
+      }).filter((l) => /^https?:\/\//.test(l.url));
+      return { about: { description: txt(m.description), subs: txt(m.subscriber_count), videos: txt(m.video_count), views: txt(m.view_count), joined: txt(m.joined_date), country: txt(m.country), links } };
+    }
+    // Home: the channel's own shelves (radios, mixes, featured channels, ...)
+    const h = await ch.getHome(), shelves = [];
+    for (const sh of h.shelves || []) {
+      const items = sh.content?.items || sh.content?.contents || [];
+      const s = { title: txt(sh.title), videos: collectVideos(items), playlists: collectPlaylists(items), channels: items.map(mapChannelNode).filter(Boolean) };
+      if (s.videos.length || s.playlists.length || s.channels.length) shelves.push(s);
+    }
+    if (!shelves.length) { const v = collectVideos(h.videos || []); if (v.length) shelves.push({ title: 'Videos', videos: v, playlists: [], channels: [] }); }
+    return { shelves };
   },
   async 'yt:channel'(id) {
     const i = await innertube();
@@ -571,6 +654,8 @@ const handlers = {
     const videos = tileVideos(vt).map((v) => ({ ...v, channelId: v.channelId || byName.get(v.channel) || '' }));
     return { videos, channels };
   },
+  // YouTube's own resume positions for recently watched videos, so every thumbnail can show its progress bar.
+  async 'me:progress'() { const i = await authed(); return tileVideos(await tvPages(i, 'FEhistory', 8)).filter((v) => v.watchedPct > 0).map((v) => ({ id: v.id, pct: v.watchedPct })); },
   async 'me:history'() { const i = await authed(); return tileVideos(await tvPages(i, 'FEhistory', 2)); },
   async 'me:playlists'() { const i = await authed(); return (await tvPages(i, 'FEplaylist_aggregation', 2)).map(tilePlaylist).filter(Boolean); },
   async 'me:rate'(id, kind) {
@@ -631,7 +716,8 @@ const handlers = {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
     return r.canceled ? null : r.filePaths[0];
   },
-  'app:openExternal'(url) { if (/^https:\/\//.test(url)) shell.openExternal(url); },
+  'app:openExternal'(url) {
+    if (HIDDEN) return; if (/^https:\/\//.test(url)) shell.openExternal(url); },
   'app:mini'(on) { toggleMini(on); },
   // Diagnostics: how much each active stream has downloaded ahead in the local cache.
   'dev:streamStats'() {
@@ -664,6 +750,7 @@ function send(cmd) { win?.webContents.send('media', cmd); }
 // The page describes a menu; we show it natively and report which item was picked (or null if dismissed).
 ipcMain.handle('ctx:menu', (e, items) => new Promise((resolve) => {
   let picked = null;
+  if (HIDDEN) return resolve(globalThis.__pick ?? null); // tests choose items programmatically
   const tpl = (Array.isArray(items) ? items : []).slice(0, 40).map((it) => it.type === 'separator' ? { type: 'separator' }
     : { label: String(it.label || ''), enabled: it.enabled !== false, ...(it.checked !== undefined ? { type: 'checkbox', checked: !!it.checked } : {}), click: () => { picked = String(it.id); } });
   Menu.buildFromTemplate(tpl).popup({ window: BrowserWindow.fromWebContents(e.sender) || win, callback: () => resolve(picked) });
@@ -673,9 +760,9 @@ function createWindow() {
   const s = store.read();
   win = new BrowserWindow({
     width: 1400, height: 900, minWidth: 900, minHeight: 600,
-    backgroundColor: '#0f0f0f', title: 'YouTube Desktop', autoHideMenuBar: true,
+    backgroundColor: '#0f0f0f', title: 'YouTube Desktop', autoHideMenuBar: true, show: !HIDDEN,
     ...(s.bounds || {}),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, backgroundThrottling: !HIDDEN },
   });
   win.loadFile('src/index.html');
   win.webContents.on('context-menu', (_e, p) => {
@@ -714,12 +801,13 @@ function toggleMini(on) {
   mini.loadFile('src/mini.html');
   // Some Linux window managers (Wayland in particular) ignore the position given at creation, so place it once it exists.
   mini.once('ready-to-show', () => {
+    if (HIDDEN) return;
     mini.show();
     // The window manager picks the first position when the window is mapped; move it once that has happened.
     for (const delay of [120, 400]) setTimeout(() => { if (mini && !mini.isDestroyed()) mini.setPosition(x, y); }, delay);
   });
   mini.on('close', () => { if (cfg().miniCorner === 'remember') store.write({ ...store.read(), miniBounds: mini.getBounds() }); });
-  mini.on('closed', () => { mini = null; win?.show(); win?.webContents.send('media', 'mini-closed'); });
+  mini.on('closed', () => { mini = null; showWin(win); win?.webContents.send('media', 'mini-closed'); });
   win.hide();
 }
 
@@ -747,6 +835,7 @@ try {
 
 app.whenReady().then(() => {
   createWindow();
+  if (HIDDEN) return;
   createTray();
   globalShortcut.register('MediaPlayPause', () => send('toggle'));
   globalShortcut.register('MediaNextTrack', () => send('next'));

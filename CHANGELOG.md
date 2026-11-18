@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Channel pages now work like the desktop site: banner, avatar, handle, subscriber and video counts, and tabs for Home (the channel's own shelves), Videos, Shorts, Live, Playlists and About (description, stats, links). Videos, Shorts and Live can be sorted Latest, Popular or Oldest, and load more as you scroll.
+- Playlist pages are a numbered list with the cover, title, Play all, Shuffle and download buttons in a side panel.
+- Fix: the Playlists page listed every playlist twice.
+- Watch-progress bars now appear on every thumbnail (channels, playlists, search, subscriptions), using your YouTube history when signed in. They also update right after you close a video, instead of only after the page reloads.
+- Test mode: with YT_TEST_HIDDEN=1 the app never shows or focuses a window.
+
 ## 0.2.0
 
 - Subtitles are centered and plain: YouTube's left-pinned positioning and grey "not yet spoken" word styling are removed.

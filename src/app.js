@@ -7,6 +7,9 @@ const signedIn = () => !!auth.active;
 const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const lsSet = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Watch progress: what this app recorded, YouTube's own resume positions (synced when signed in), or the feed's value.
+let ytProg = lsGet('ytprogress', {});
+const progOf = (v) => Math.max(lsGet('progress', {})[v.id]?.pct || 0, ytProg[v.id] || 0, v.watchedPct || 0);
 const fmtNum = (n) => (n == null ? '' : Intl.NumberFormat('en', { notation: 'compact' }).format(n));
 const isWatched = (id) => !!lsGet('watched', {})[id];
 function setWatched(ids, on) {
@@ -198,7 +201,7 @@ document.addEventListener('click', (e) => {
 // ---------- cards / grids ----------
 function card(v, opts = {}) {
   // Watched progress: what this app remembers, or YouTube's own resume position when signed in.
-  const prog = Math.max(lsGet('progress', {})[v.id]?.pct || 0, v.watchedPct || 0);
+  const prog = progOf(v);
   const el = document.createElement('div');
   el.className = 'card' + (isWatched(v.id) && opts.dim ? ' watched' : '');
   el.innerHTML = `<div class="th${prog > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${prog > 1 ? `<div class="bar" style="width:${Math.min(100, prog)}%"></div>` : ''}${isWatched(v.id) && opts.dim ? '<span class="wbadge">Watched</span>' : ''}</div>
@@ -229,7 +232,19 @@ function renderVideos(list, target = grid, opts = {}) {
   for (const v of list) { if (seen.has(v.id)) continue; seen.add(v.id); target.appendChild(card(v, { queue: list, ...opts })); }
 }
 const setStatus = (t) => (status.textContent = t || '');
-function showMain() { $('#watch').hidden = true; $('#main').hidden = false; $('#subbox').hidden = true; $('#filters').hidden = true; grid.hidden = false; syncSideAuto(); }
+function applyBars() {
+  for (const el of document.querySelectorAll('.card, .plrow, .subrow')) {
+    const v = el._v, th = el.querySelector('.th'); if (!v || !th) continue;
+    const p = progOf(v); let bar = th.querySelector('.bar');
+    if (p > 1) { if (!bar) { bar = document.createElement('div'); bar.className = 'bar'; th.appendChild(bar); } bar.style.width = Math.min(100, p) + '%'; th.classList.add('hasbar'); }
+    else if (bar) { bar.remove(); th.classList.remove('hasbar'); }
+  }
+}
+async function syncProgress() {
+  if (!signedIn()) { ytProg = {}; lsSet('ytprogress', {}); return; }
+  try { const m = {}; for (const x of await api.meProgress()) m[x.id] = x.pct; ytProg = m; lsSet('ytprogress', m); applyBars(); } catch {}
+}
+function showMain() { applyBars(); $('#chan').hidden = true; $('#watch').hidden = true; $('#main').hidden = false; $('#subbox').hidden = true; $('#filters').hidden = true; grid.hidden = false; syncSideAuto(); }
 async function guarded(label, fn) { setStatus(`Loading ${label}…`); try { await fn(); setStatus(''); } catch (e) { setStatus('Error: ' + e.message); } }
 
 // ---------- views ----------
@@ -305,34 +320,130 @@ async function startPlaylistDownload(id, title, kind) {
   list.unshift({ key: 'PL:' + id, id: 'PL:' + id, title, kind: 'playlist', state: 'starting', pct: 0 }); lsSet('downloads', list.slice(0, 100));
   await api.downloadPlaylist(id, kind);
 }
-async function openPlaylist(id) {
-  view = 'playlist'; showMain(); grid.innerHTML = '';
-  await guarded('playlist', async () => {
-    const pl = await api.playlist(id);
-    const h = document.createElement('div'); h.className = 'channel-head'; h.style.flexWrap = 'wrap';
-    h.innerHTML = `<div style="flex:1;min-width:240px"><h2>${esc(pl.title)}</h2><div class="meta" style="color:var(--fg2)">${esc(pl.author)} • ${esc(pl.total)} videos</div><div id="pl-progress" class="hint"></div></div>
-      <button id="pl-play">▶ Play all</button><button id="pl-dlv">⬇ Download all (video)</button><button id="pl-dla">♫ Download all (MP3)</button><button id="pl-cancel" hidden>Cancel download</button>`;
-    grid.appendChild(h);
-    $('#pl-play').onclick = () => { if (pl.videos[0]) { queue = pl.videos; openVideo(pl.videos[0]); } };
-    const dl = async (kind) => {
-      $('#pl-progress').textContent = 'Starting…'; $('#pl-cancel').hidden = false;
-      try { await startPlaylistDownload(id, pl.title, kind); } catch (e) { $('#pl-progress').textContent = 'Could not start: ' + e.message; $('#pl-cancel').hidden = true; }
-    };
-    $('#pl-dlv').onclick = () => dl('video'); $('#pl-dla').onclick = () => dl('audio');
-    $('#pl-cancel').onclick = () => api.cancelDownload('PL:' + id);
-    renderVideos(pl.videos);
-  });
+function playlistRow(v, n, queueList) {
+  const el = document.createElement('div'); el.className = 'plrow'; el._v = v;
+  const pr = progOf(v);
+  el.innerHTML = `<span class="n">${n}</span><div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}</div>
+    <div class="info"><h3>${esc(v.title)}</h3><div class="meta">${v.channelId ? `<a class="linkish" data-ch="${esc(v.channelId)}">${esc(v.channel)}</a>` : esc(v.channel)}${[v.views, v.published].filter(Boolean).map((x) => ' • ' + esc(x)).join('')}</div></div>`;
+  el.onclick = (e) => { const c = e.target.closest('[data-ch]'); if (c) { e.stopPropagation(); return openChannel(c.dataset.ch); } queue = queueList; openVideo(v); };
+  applyDeArrow(el, v);
+  return el;
 }
-async function openChannel(id) {
-  view = 'channel'; showMain(); grid.innerHTML = '';
-  await guarded('channel', async () => {
-    const c = await api.channel(id);
-    const h = document.createElement('div');
-    h.className = 'channel-head';
-    h.innerHTML = `<img src="${esc(c.avatar)}"><div><h2>${esc(c.name)}</h2><button>${isSub(id) ? '✓ Subscribed' : 'Subscribe'}</button></div>`;
-    h.querySelector('button').onclick = async (e) => { await setSub({ id, name: c.name, avatar: c.avatar }); e.target.textContent = isSub(id) ? '✓ Subscribed' : 'Subscribe'; };
-    grid.appendChild(h); renderVideos(c.videos);
-  });
+// Playlist page: a side panel with the cover and actions, and a numbered list of videos (like the desktop site).
+async function openPlaylist(id) {
+  view = 'playlist'; showMain(); grid.hidden = true;
+  const box = $('#chan'); box.hidden = false; box.innerHTML = '<div class="hint" style="padding:24px">Loading playlist…</div>'; setStatus('');
+  let pl;
+  try { pl = await api.playlist(id); }
+  catch (e) { box.hidden = true; grid.hidden = false; return setStatus('Could not open this playlist: ' + e.message); }
+  const first = pl.videos[0];
+  box.innerHTML = `<div class="pl-wrap"><aside class="pl-side">
+      <div class="pl-cover">${first ? `<img src="${esc(first.thumb)}">` : ''}<span class="pl-count">${esc(pl.total)} videos</span></div>
+      <h1>${esc(pl.title)}</h1><div class="meta">${esc(pl.author)}</div>
+      <div class="pl-actions"><button id="pl-play" class="pri">${ic('play')}Play all</button><button id="pl-shuffle">${ic('repeat')}Shuffle</button></div>
+      <div class="pl-actions"><button id="pl-dlv">${ic('download')}Video</button><button id="pl-dla">${ic('music')}MP3</button><button id="pl-cancel" hidden>Cancel</button></div>
+      <div id="pl-progress" class="hint"></div></aside><section class="pl-list" id="pl-list"></section></div>`;
+  const list = $('#pl-list');
+  if (!pl.videos.length) list.innerHTML = '<div class="hint" style="padding:24px 0">This playlist has no videos.</div>';
+  pl.videos.forEach((v, i) => list.appendChild(playlistRow(v, i + 1, pl.videos)));
+  $('#pl-play').onclick = () => { if (pl.videos[0]) { queue = pl.videos; openVideo(pl.videos[0]); } };
+  $('#pl-shuffle').onclick = () => { if (!pl.videos.length) return; queue = [...pl.videos].sort(() => Math.random() - 0.5); openVideo(queue[0]); };
+  const dl = async (kind) => {
+    $('#pl-progress').textContent = 'Starting…'; $('#pl-cancel').hidden = false;
+    try { await startPlaylistDownload(id, pl.title, kind); } catch (e) { $('#pl-progress').textContent = 'Could not start: ' + e.message; $('#pl-cancel').hidden = true; }
+  };
+  $('#pl-dlv').onclick = () => dl('video'); $('#pl-dla').onclick = () => dl('audio');
+  $('#pl-cancel').onclick = () => api.cancelDownload('PL:' + id);
+}
+
+// ---------- channel pages (header, banner, tabs, shelves, sorting, endless paging) ----------
+let chanState = null;
+function channelCard(c) {
+  const el = document.createElement('div'); el.className = 'card chcard';
+  el.innerHTML = `<div class="av">${c.avatar ? `<img loading="lazy" src="${esc(c.avatar)}">` : ''}</div><h3>${esc(c.name)}</h3><div class="meta">${esc([c.handle, c.subs].filter(Boolean).join(' • '))}</div>`;
+  el.onclick = () => openChannel(c.id);
+  return el;
+}
+async function openChannel(id, tab = 'Home') {
+  view = 'channel'; showMain(); grid.hidden = true;
+  const box = $('#chan'); box.hidden = false; box.innerHTML = '<div class="hint" style="padding:24px">Loading channel…</div>'; setStatus('');
+  let info;
+  try { info = await api.channelInfo(id); }
+  catch (e) { box.hidden = true; grid.hidden = false; return setStatus('Could not open this channel: ' + e.message); }
+  chanState = { id, info, tab: null, sort: 'Latest', req: 0, io: null };
+  const subbed = isSub(id);
+  box.innerHTML = `${info.banner ? `<div class="ch-banner" style="background-image:url('${esc(info.banner)}')"></div>` : ''}
+    <div class="ch-head"><img class="ch-av" ${info.avatar ? `src="${esc(info.avatar)}"` : ''}>
+      <div class="ch-meta"><h1>${esc(info.name)}</h1><div class="ch-line">${[info.handle, info.subs, info.videosCount].filter(Boolean).map(esc).join(' • ')}</div>
+      ${info.description ? `<div class="ch-desc">${esc(info.description.split('\n')[0].slice(0, 160))} <a class="linkish" data-tab="About">more</a></div>` : ''}
+      <button id="ch-sub" class="${subbed ? 'on' : ''}">${subbed ? '✓ Subscribed' : 'Subscribe'}</button></div></div>
+    <div class="ch-tabs">${info.tabs.map((t) => `<a data-tab="${t}">${t}</a>`).join('')}</div><div id="ch-body"></div>`;
+  box.querySelectorAll('[data-tab]').forEach((el) => (el.onclick = () => showChanTab(el.dataset.tab)));
+  $('#ch-sub').onclick = async (e) => { await setSub({ id, name: info.name, avatar: info.avatar }); const s = isSub(id); e.target.textContent = s ? '✓ Subscribed' : 'Subscribe'; e.target.classList.toggle('on', s); };
+  await showChanTab(info.tabs.includes(tab) ? tab : info.tabs[0]);
+}
+async function showChanTab(tab, sort) {
+  const st = chanState; if (!st) return;
+  st.tab = tab; st.sort = sort || 'Latest'; st.io?.disconnect();
+  $('#chan').querySelectorAll('.ch-tabs a').forEach((el) => el.classList.toggle('on', el.dataset.tab === tab));
+  const body = $('#ch-body'), req = ++st.req;
+  body.innerHTML = '<div class="hint" style="padding:24px 0">Loading…</div>';
+  try {
+    const r = await api.channelTab(st.id, tab, ['Videos', 'Shorts', 'Live'].includes(tab) ? st.sort : undefined);
+    if (st.req === req) renderChanTab(body, tab, r, req);
+  } catch (e) { if (st.req === req) body.innerHTML = `<div class="hint" style="padding:24px 0">Could not load this tab: ${esc(e.message)}</div>`; }
+}
+function renderChanTab(body, tab, r, req) {
+  const st = chanState; body.innerHTML = '';
+  if (tab === 'About') {
+    const x = r.about, facts = [x.joined, x.subs, x.videos, x.views, x.country && 'Country: ' + x.country].filter(Boolean);
+    body.innerHTML = `<div class="ch-about"><div class="box"><h3>Description</h3><div class="ab-desc">${rich(x.description || 'This channel has no description.')}</div></div>
+      <div class="box"><h3>Details</h3>${facts.map((f) => `<div class="ab-fact">${esc(f)}</div>`).join('') || '<div class="hint">No details.</div>'}</div>
+      ${x.links.length ? `<div class="box"><h3>Links</h3>${x.links.map((l) => `<a class="ab-link" data-url="${esc(l.url)}">${l.icon ? `<img src="${esc(l.icon)}">` : ''}<span>${esc(l.title || l.text)}<small>${esc(l.text)}</small></span></a>`).join('')}</div>` : ''}</div>`;
+    return;
+  }
+  if (tab === 'Home') {
+    if (!r.shelves.length) { body.innerHTML = '<div class="hint" style="padding:24px 0">Nothing to show on this channel’s home page. Try the Videos tab.</div>'; return; }
+    const all = r.shelves.flatMap((s) => s.videos);
+    for (const sh of r.shelves) {
+      const sec = document.createElement('section'); sec.className = 'ch-shelf';
+      sec.innerHTML = `<h2>${esc(sh.title)}</h2><div class="ch-rowwrap"><button class="ch-arrow l" title="Scroll left">${ic('chevleft')}</button><div class="ch-row"></div><button class="ch-arrow r" title="Scroll right">${ic('chevright')}</button></div>`;
+      const row = sec.querySelector('.ch-row');
+      for (const v of sh.videos) row.appendChild(card(v, { queue: all, dim: true }));
+      for (const p of sh.playlists) row.appendChild(playlistCard(p));
+      for (const c of sh.channels) row.appendChild(channelCard(c));
+      sec.querySelector('.l').onclick = () => row.scrollBy({ left: -row.clientWidth * 0.8, behavior: 'smooth' });
+      sec.querySelector('.r').onclick = () => row.scrollBy({ left: row.clientWidth * 0.8, behavior: 'smooth' });
+      body.appendChild(sec);
+    }
+    return;
+  }
+  if (r.sorts && tab !== 'Playlists') {
+    const bar = document.createElement('div'); bar.className = 'ch-sorts';
+    bar.innerHTML = r.sorts.map((s) => `<button data-sort="${esc(s)}" class="${s === st.sort ? 'on' : ''}">${esc(s)}</button>`).join('');
+    bar.onclick = (e) => { const b = e.target.closest('[data-sort]'); if (b) showChanTab(tab, b.dataset.sort); };
+    body.appendChild(bar);
+  }
+  const g = document.createElement('div'); g.className = tab === 'Shorts' ? 'ch-grid shorts' : 'ch-grid'; body.appendChild(g);
+  const all = [];
+  const add = (res) => {
+    if (tab === 'Playlists') for (const p of res.playlists) g.appendChild(playlistCard(p));
+    else for (const v of res.videos) { all.push(v); g.appendChild(card(v, { queue: all, dim: true })); }
+  };
+  add(r);
+  if (!g.children.length) { g.outerHTML = `<div class="hint" style="padding:24px 0">${tab === 'Live' ? 'No live streams or past broadcasts.' : 'Nothing here yet.'}</div>`; return; }
+  let more = r.more, busy = false;
+  const sentinel = document.createElement('div'); sentinel.className = 'ch-more'; body.appendChild(sentinel);
+  if (!more) return;
+  const loadMore = async () => {
+    if (!more || busy) return; busy = true; sentinel.textContent = 'Loading more…';
+    try { const nx = await api.channelTab(st.id, tab, st.sort, more); if (st.req !== req) return; more = nx.more; add(nx); sentinel.textContent = ''; }
+    catch (e) { sentinel.textContent = 'Could not load more: ' + e.message; busy = false; return; }
+    busy = false;
+    if (more) { st.io.unobserve(sentinel); st.io.observe(sentinel); } else st.io.disconnect();
+  };
+  st.io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMore(); }, { root: $('#main'), rootMargin: '700px' });
+  st.io.observe(sentinel);
 }
 function showList(key, title) {
   view = key; showMain(); grid.innerHTML = ''; setStatus('');
@@ -470,7 +581,7 @@ function subRow(v, queueList) {
   const el = document.createElement('div');
   const w = isWatched(v.id);
   el.className = 'subrow' + (w ? ' watched' : '');
-  const pr = Math.max(lsGet('progress', {})[v.id]?.pct || 0, v.watchedPct || 0);
+  const pr = progOf(v);
   el.innerHTML = `<div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}</div>
     <div class="info"><h3>${esc(v.title)}</h3><div class="meta"><a class="linkish" data-ch="${esc(v.channelId)}">${esc(v.channel)}</a> • ${esc([v.views, v.published].filter(Boolean).join(' • '))}</div>
     <div class="acts"><button data-a="watch">${w ? 'Mark unwatched' : 'Mark watched'}</button><button data-a="later">Watch later</button></div></div>`;
@@ -972,7 +1083,7 @@ function updateAuthUI() {
 }
 async function onAccountChanged() {
   lsSet('subcache', { ts: 0, videos: [] }); remoteSubs = null;
-  await refreshAuth();
+  await refreshAuth(); ytProg = {}; syncProgress();
   if (signedIn()) fetchSubs().then(renderSideSubs).catch(() => {});
   renderSideSubs();
   if (view === 'subs') showSubs(true); else if (view === 'playlists') showPlaylists(); else goHome();
@@ -1039,6 +1150,11 @@ async function loadSegments(id) {
   } catch {}
 }
 let lastSave = 0;
+function saveProgress(done) {
+  if (!current || !video.duration || !isFinite(video.duration)) return;
+  const p = lsGet('progress', {}); p[current.id] = { t: done ? video.duration : video.currentTime, pct: done ? 100 : (video.currentTime / video.duration) * 100 }; lsSet('progress', p);
+}
+video.addEventListener('pause', () => saveProgress()); // keep the bar accurate when you stop, not just every few seconds
 video.addEventListener('timeupdate', () => {
   if (settings.sponsorblock) {
     for (const s of segments) {
@@ -1053,7 +1169,7 @@ video.addEventListener('timeupdate', () => {
     const now = Date.now();
     if (now - lastSave > 4000) {
       lastSave = now;
-      const p = lsGet('progress', {}); p[current.id] = { t: video.currentTime, pct: (video.currentTime / video.duration) * 100 }; lsSet('progress', p);
+      saveProgress();
     }
   }
   api.sendState({ src: video.currentSrc, audio: audioActive ? audio.currentSrc : null, time: video.currentTime, playing: !video.paused });
@@ -1065,7 +1181,7 @@ video.addEventListener('error', () => {
   streamRetries++; toast('Reconnecting…');
   loadStream(current.id, settings.quality || 'auto', video.currentTime || 0).catch(() => {});
 });
-video.addEventListener('ended', () => { if (sleepEnding) return fireSleep(); if (!video.loop && settings.autoplayNext !== false) playNext(); });
+video.addEventListener('ended', () => { saveProgress(true); if (sleepEnding) return fireSleep(); if (!video.loop && settings.autoplayNext !== false) playNext(); });
 // The main process needs to know whether something is playing (for the mini player's open-on-minimize option).
 for (const ev of ['play', 'pause']) video.addEventListener(ev, () => api.sendState({ src: video.currentSrc, audio: audioActive ? audio.currentSrc : null, time: video.currentTime, playing: !video.paused }));
 function playNext() {
@@ -1162,7 +1278,7 @@ $('#side-resizer').addEventListener('mousedown', (e) => {
 const ytUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
 document.addEventListener('contextmenu', async (e) => {
   const t = e.target;
-  const card = t.closest?.('.card, .subrow'), vidEl = t.closest?.('video'), link = t.closest?.('a[data-url]');
+  const card = t.closest?.('.card, .subrow, .plrow'), vidEl = t.closest?.('video'), link = t.closest?.('a[data-url]');
   const items = [], run = {}, add = (id, label, fn, extra) => { items.push({ id, label, ...extra }); run[id] = fn; }, sep = () => items.length && items[items.length - 1].type !== 'separator' && items.push({ type: 'separator' });
   if (card?._v) {
     const v = card._v, w = isWatched(v.id), later = inList('watchlater', v.id);
@@ -1239,6 +1355,7 @@ document.addEventListener('keydown', (e) => {
   paintIcons(); await loadSettings(); await refreshAuth();
   video.volume = Math.min(1, Math.max(0, (settings.defaultVolume ?? 100) / 100));
   if (signedIn()) fetchSubs().then(renderSideSubs).catch(() => {});
+  syncProgress(); setInterval(syncProgress, 30 * 60 * 1000);
   const start = { subs: () => document.querySelector('#side [data-nav=subs]').click(), playlists: () => document.querySelector('#side [data-nav=playlists]').click(), history: () => document.querySelector('#side [data-nav=history]').click() }[settings.startPage];
   (start || goHome)();
 })();
