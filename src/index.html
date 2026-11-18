@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src https: data:; media-src https: blob: data:; connect-src https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>YouTube Desktop</title>
+<link rel="stylesheet" href="styles.css">
+<style id="custom-css"></style>
+<style id="cue-css"></style>
+</head>
+<body>
+<header id="top">
+  <button id="menu-btn" title="Menu">☰</button>
+  <div id="logo" title="Home"><span class="logo-mark">▶</span><span class="logo-text">You<span class="tube">Tube</span></span></div>
+  <div id="search-wrap">
+    <input id="search" placeholder="Search" autocomplete="off">
+    <button id="search-btn" title="Search">🔍</button>
+    <ul id="suggest" hidden></ul>
+  </div>
+  <button id="bell-btn" title="Notifications" hidden>🔔<span id="bell-badge" hidden></span></button>
+  <button id="acct-btn" title="Sign in">👤</button>
+  <button id="settings-btn" title="Settings">⚙</button>
+</header>
+<div id="layout">
+  <nav id="side">
+    <a data-nav="home" class="active">🏠 Home</a>
+    <a data-nav="subs">📺 Subscriptions</a>
+    <a data-nav="playlists">☰ Playlists</a>
+    <a data-nav="history">🕘 History</a>
+    <a data-nav="watchlater">⏱ Watch later</a>
+    <a data-nav="downloads">⬇ Downloads</a>
+  </nav>
+  <main id="main"><div id="filters" hidden></div><div id="subbox" hidden></div><div id="grid"></div><div id="status"></div></main>
+  <section id="watch" hidden>
+    <div id="player-area">
+      <div id="player-box">
+        <video id="video" controls autoplay></video>
+        <div id="sb-toast" hidden></div>
+      </div>
+      <div id="toolbar-wrap">
+        <div id="player-tools"></div>
+        <div id="toolbar-ctl"></div>
+        <ul id="tool-menu" hidden></ul>
+      </div>
+    </div>
+    <div id="details">
+      <h1 id="w-title"></h1>
+      <div id="w-channel-row">
+        <img id="w-avatar" alt="">
+        <div id="w-channel-text"><a id="w-ch"></a><span id="w-subs"></span></div>
+        <button id="w-sub">＋ Subscribe</button>
+        <span id="rate" class="chip"><button id="r-like" title="Like">👍 <span id="r-likes"></span></button><button id="r-dislike" title="Dislike">👎 <span id="r-dislikes"></span></button></span>
+      </div>
+      <div id="w-desc" class="box collapsed">
+        <div id="w-stats"></div>
+        <div id="w-desc-text"></div>
+        <button id="desc-toggle" class="link">Show more</button>
+      </div>
+      <section id="comments-box" class="box">
+        <header>
+          <h3 id="c-title">Comments</h3>
+          <select id="c-sort" title="Sort comments"><option value="TOP_COMMENTS">Top</option><option value="NEWEST_FIRST">Newest</option></select>
+          <button id="c-toggle" class="link">Hide</button>
+        </header>
+        <div id="c-compose"><textarea id="c-input" rows="2" placeholder="Add a comment…"></textarea><button id="c-post">Comment</button></div>
+        <div id="c-list"></div>
+      </section>
+    </div>
+    <aside id="related"></aside>
+  </section>
+</div>
+<div id="acct-menu" class="popover" hidden></div>
+<div id="notif-panel" class="popover" hidden></div>
+<div id="login" class="overlay" hidden>
+  <div class="panel">
+    <h2>Sign in to YouTube</h2>
+    <div id="login-body"></div>
+    <button id="login-cancel">Cancel</button>
+  </div>
+</div>
+<div id="settings" hidden>
+  <div class="panel wide">
+    <header class="s-head"><h2>Settings</h2><button id="s-close" title="Close">✕</button></header>
+    <div class="s-body"><nav id="s-tabs"></nav><div id="s-pane"></div></div>
+  </div>
+</div>
+<script src="settings-schema.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

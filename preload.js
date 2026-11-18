@@ -1,0 +1,57 @@
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
+
+const call = async (name, ...args) => {
+  const r = await ipcRenderer.invoke(name, ...args);
+  if (!r.ok) throw new Error(r.error);
+  return r.data;
+};
+
+contextBridge.exposeInMainWorld('api', {
+  home: (seeds) => call('yt:home', seeds),
+  search: (q, f) => call('yt:search', q, f),
+  suggest: (q) => call('yt:suggest', q),
+  video: (id) => call('yt:video', id),
+  comments: (id, sort) => call('yt:comments', id, sort),
+  channel: (id) => call('yt:channel', id),
+  stream: (id, q) => call('yt:stream', id, q),
+  download: (id, kind, opts) => call('yt:download', id, kind, opts),
+  openDownloads: () => call('app:openDownloads'),
+  relaunch: () => call('app:relaunch'),
+  session: process.env.XDG_SESSION_TYPE || '',
+  showFile: (p) => call('app:showFile', p),
+  setZoom: (f) => webFrame.setZoomFactor(Math.min(2, Math.max(0.5, f))),
+  authStatus: () => call('auth:status'),
+  authBegin: () => call('auth:begin'),
+  authCancel: () => call('auth:cancel'),
+  authSwitch: (id) => call('auth:switch', id),
+  authRemove: (id) => call('auth:remove', id),
+  authChannels: () => call('auth:channels'),
+  authSetChannel: (t, n) => call('auth:setChannel', t, n),
+  onAuth: (cb) => ipcRenderer.on('auth', (_e, m) => cb(m)),
+  meSubs: () => call('me:subs'),
+  meHistory: () => call('me:history'),
+  mePlaylists: () => call('me:playlists'),
+  meNotifs: () => call('me:notifs'),
+  meNotifCount: () => call('me:notifCount'),
+  rate: (id, k) => call('me:rate', id, k),
+  subscribe: (c, on) => call('me:subscribe', c, on),
+  postComment: (id, t) => call('me:comment', id, t),
+  addToPlaylist: (p, v) => call('me:addToPlaylist', p, v),
+  reportWatched: (id) => call('me:watched', id),
+  playlist: (id) => call('yt:playlist', id),
+  subsList: (id) => call('yt:subs-list', id),
+  subsGet: (id, l, a) => call('yt:subs-get', id, l, a),
+  downloadPlaylist: (id, k, o) => call('yt:download-playlist', id, k, o),
+  cancelDownload: (k) => call('dl:cancel', k),
+  getSettings: () => call('settings:get'),
+  setSettings: (p) => call('settings:set', p),
+  pickDir: () => call('app:pickDir'),
+  openExternal: (u) => call('app:openExternal', u),
+  mini: (on) => call('app:mini', on),
+  copy: (t) => call('app:copy', t),
+  onMedia: (cb) => ipcRenderer.on('media', (_e, c) => cb(c)),
+  onDownload: (cb) => ipcRenderer.on('download-progress', (_e, p) => cb(p)),
+  miniCmd: (c) => ipcRenderer.send('mini-cmd', c),
+  sendState: (s) => ipcRenderer.send('player-state', s),
+  onMiniState: (cb) => ipcRenderer.on('mini-state', (_e, s) => cb(s)),
+});

@@ -1,0 +1,19 @@
+{
+  "name": "youtube-desktop",
+  "version": "0.1.0",
+  "description": "A feature-rich desktop YouTube client",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --linux AppImage deb"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "electron": "^45.3.4",
+    "hls.js": "^1.7.4",
+    "youtubei.js": "^18.3.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.18.0"
+  }
+}
