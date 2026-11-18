@@ -22,7 +22,7 @@ const SCHEMA = {
     watchRelated: 'side', theater: false, commentsHidden: false, descExpanded: false, showDislikes: true,
     subsView: 'grouped', subsGroupBy: 'date', subsHideWatched: true, subsSort: 'new', subsLayout: 'list',
     sponsorblock: true, sbc_sponsor: true, sbc_selfpromo: true, sbc_interaction: true, sbc_intro: true, sbc_outro: true, sbc_preview: false, sbc_music_offtopic: false, sbc_filler: false,
-    dearrow: true, ryd: true, syncHistory: true,
+    dearrow: true, ryd: true,
   },
   tabs: [
     { id: 'general', label: 'General', groups: [
@@ -168,7 +168,6 @@ const SCHEMA = {
       { title: 'Other services', items: [
         { key: 'dearrow', type: 'toggle', label: 'DeArrow: community titles and thumbnails', hint: 'Only a 4-character hash of each video ID is sent.' },
         { key: 'ryd', type: 'toggle', label: 'Return YouTube Dislike: show dislike counts' },
-        { key: 'syncHistory', type: 'toggle', label: 'When signed in, add watched videos to my YouTube history' },
       ] },
       { title: 'Local data', items: [
         { type: 'button', label: 'Clear watch history and progress', action: 'clearHistory', danger: true },

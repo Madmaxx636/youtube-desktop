@@ -208,6 +208,7 @@ function card(v, opts = {}) {
     openVideo(v);
   };
   applyDeArrow(el, v);
+  el._v = v;
   return el;
 }
 function renderVideos(list, target = grid, opts = {}) {
@@ -266,8 +267,9 @@ async function doSearch(q, keepFilters) {
 }
 function playlistCard(p) {
   const el = document.createElement('div'); el.className = 'card';
-  el.innerHTML = `<div class="th"><img loading="lazy" src="${esc(p.thumb)}">${p.count ? `<span class="dur">${esc(p.count)}</span>` : ''}</div><div class="ci"><h3>${esc(p.title)}</h3><div class="meta">Playlist</div></div>`;
+  el.innerHTML = `<div class="th"><img loading="lazy" src="${esc(p.thumb)}">${p.count ? `<span class="dur">${esc(p.count)}</span>` : ''}</div><div class="ci"><h3>${esc(p.title)}</h3><div class="meta">${esc(p.meta || 'Playlist')}</div></div>`;
   el.onclick = () => openPlaylist(p.id);
+  el._pl = p;
   return el;
 }
 async function showHistory() {
@@ -286,6 +288,11 @@ async function showPlaylists() {
   if (!signedIn()) return setStatus('Sign in (👤) to see your own playlists. You can still open any public playlist above.');
   await guarded('playlists', async () => { const l = await api.mePlaylists(); if (!l.length) setStatus('No playlists found.'); for (const p of l) grid.appendChild(playlistCard(p)); });
 }
+async function startPlaylistDownload(id, title, kind) {
+  const list = lsGet('downloads', []).filter((x) => x.key !== 'PL:' + id);
+  list.unshift({ key: 'PL:' + id, id: 'PL:' + id, title, kind: 'playlist', state: 'starting', pct: 0 }); lsSet('downloads', list.slice(0, 100));
+  await api.downloadPlaylist(id, kind);
+}
 async function openPlaylist(id) {
   view = 'playlist'; showMain(); grid.innerHTML = '';
   await guarded('playlist', async () => {
@@ -297,9 +304,7 @@ async function openPlaylist(id) {
     $('#pl-play').onclick = () => { if (pl.videos[0]) { queue = pl.videos; openVideo(pl.videos[0]); } };
     const dl = async (kind) => {
       $('#pl-progress').textContent = 'Starting…'; $('#pl-cancel').hidden = false;
-      const list = lsGet('downloads', []).filter((x) => x.key !== 'PL:' + id);
-      list.unshift({ key: 'PL:' + id, id: 'PL:' + id, title: pl.title, kind: 'playlist', state: 'starting', pct: 0 }); lsSet('downloads', list.slice(0, 100));
-      try { await api.downloadPlaylist(id, kind); } catch (e) { $('#pl-progress').textContent = 'Could not start: ' + e.message; $('#pl-cancel').hidden = true; }
+      try { await startPlaylistDownload(id, pl.title, kind); } catch (e) { $('#pl-progress').textContent = 'Could not start: ' + e.message; $('#pl-cancel').hidden = true; }
     };
     $('#pl-dlv').onclick = () => dl('video'); $('#pl-dla').onclick = () => dl('audio');
     $('#pl-cancel').onclick = () => api.cancelDownload('PL:' + id);
@@ -461,6 +466,7 @@ function subRow(v, queueList) {
   el.querySelector('[data-a=watch]').onclick = () => { setWatched(v.id, !w); renderSubBox(); };
   el.querySelector('[data-a=later]').onclick = (e) => { pushList('watchlater', v); e.target.textContent = 'Added ✓'; };
   applyDeArrow(el, v);
+  el._v = v;
   return el;
 }
 
@@ -546,7 +552,7 @@ $('#search-btn').onclick = () => doSearch($('#search').value);
 document.addEventListener('click', (e) => {
   if (!e.target.closest('#search-wrap')) $('#suggest').hidden = true;
   if (!e.target.closest('#tool-menu') && !e.target.closest('#add-tool') && !e.target.closest('[data-id=saveplaylist]')) $('#tool-menu').hidden = true;
-  if (!e.target.closest('.popover') && !e.target.closest('#acct-btn') && !e.target.closest('#bell-btn')) { $('#acct-menu').hidden = true; $('#notif-panel').hidden = true; }
+  if (!e.target.closest('.popover') && !e.target.closest('#acct-btn')) $('#acct-menu').hidden = true;
 });
 
 // ---------- subscriptions / lists ----------
@@ -746,7 +752,7 @@ async function openVideo(v) {
     if (info.channelThumb) $('#w-avatar').src = info.channelThumb;
     if (info.likes && !$('#r-likes').textContent) $('#r-likes').textContent = fmtNum(info.likes);
     daBranding(v.id).then((b) => { const r = daPick(b, v.id); if (settings.dearrow && r?.title && current?.id === v.id) { $('#w-title').title = info.title || v.title; $('#w-title').textContent = r.title; } });
-    if (signedIn() && settings.syncHistory !== false) api.reportWatched(v.id).catch(() => {});
+
     $('#w-stats').textContent = [info.views != null ? fmtNum(info.views) + ' views' : '', info.relative || info.published].filter(Boolean).join(' • ');
     $('#w-desc-text').innerHTML = rich(info.description || '');
     $('#desc-toggle').hidden = $('#w-desc-text').scrollHeight < 72; // short descriptions need no toggle
@@ -788,10 +794,11 @@ const DL_PRESETS = [
   ['Audio, M4A (AAC)', 'audio', { audioFormat: 'm4a', audioQuality: '0' }], ['Audio, FLAC (lossless)', 'audio', { audioFormat: 'flac' }],
   ['Subtitles only (.srt)', 'subs', {}],
 ];
-async function startDownload(kind, opts) {
-  if (!current) return;
-  const key = current.id, list = lsGet('downloads', []).filter((x) => x.key !== key);
-  list.unshift({ key, id: key, title: current.title, kind, state: 'starting', pct: 0 }); lsSet('downloads', list.slice(0, 100));
+async function startDownload(kind, opts, video) {
+  const v = video || current;
+  if (!v) return;
+  const key = v.id, list = lsGet('downloads', []).filter((x) => x.key !== key);
+  list.unshift({ key, id: key, title: v.title, kind, state: 'starting', pct: 0 }); lsSet('downloads', list.slice(0, 100));
   try { await api.download(key, kind, opts); toast('Download started. Progress is on the Downloads page.'); }
   catch (e) { const l = lsGet('downloads', []), x = l.find((i) => i.key === key); if (x) { x.state = 'failed'; x.error = e.message; lsSet('downloads', l); } toast('Could not start: ' + e.message); }
 }
@@ -905,11 +912,11 @@ async function refreshAuth() { try { auth = await api.authStatus(); } catch {} u
 function updateAuthUI() {
   const a = auth.accounts.find((x) => x.id === auth.active), b = $('#acct-btn');
   b.innerHTML = a?.avatar ? `<img src="${esc(a.avatar)}" style="width:28px;height:28px;border-radius:50%;vertical-align:middle">` : '👤';
-  b.title = a ? a.name : 'Sign in'; $('#bell-btn').hidden = !signedIn();
+  b.title = a ? a.name : 'Sign in';
 }
 async function onAccountChanged() {
   lsSet('subcache', { ts: 0, videos: [] }); remoteSubs = null;
-  await refreshAuth(); updateNotifBadge();
+  await refreshAuth();
   if (signedIn()) fetchSubs().catch(() => {});
   if (view === 'subs') showSubs(true); else if (view === 'playlists') showPlaylists(); else goHome();
 }
@@ -928,6 +935,8 @@ api.onAuth((m) => {
   } else if (m.state === 'error') {
     $('#login-body').innerHTML = `<p>Sign-in failed: ${esc(m.error)}</p><p><button id="login-retry">Try again</button></p>`;
     $('#login-retry').onclick = () => startLogin();
+  } else if (m.state === 'update') {
+    auth = m; updateAuthUI();
   } else if (m.state === 'done') {
     $('#login').hidden = true; auth = m; onAccountChanged();
   }
@@ -958,31 +967,7 @@ async function buildAcctMenu() {
   }
   if (auth.accounts.length && !auth.encrypted) m.insertAdjacentHTML('beforeend', '<div class="hint">No system keyring was found, so sign-in tokens are stored unencrypted in this app\'s data folder (readable only by you).</div>');
 }
-$('#acct-btn').onclick = () => { $('#notif-panel').hidden = true; const m = $('#acct-menu'); if (!m.hidden) { m.hidden = true; return; } if (!signedIn() && !auth.accounts.length) return startLogin(); m.hidden = false; buildAcctMenu(); };
-
-// ---------- notifications ----------
-async function updateNotifBadge() {
-  const b = $('#bell-badge');
-  if (!signedIn()) { b.hidden = true; return; }
-  try { const n = await api.meNotifCount(); b.textContent = n > 99 ? '99+' : n; b.hidden = !n; } catch { b.hidden = true; }
-}
-$('#bell-btn').onclick = async () => {
-  $('#acct-menu').hidden = true; const p = $('#notif-panel');
-  if (!p.hidden) { p.hidden = true; return; }
-  p.hidden = false; p.innerHTML = '<div class="hint">Loading…</div>';
-  try {
-    const list = await api.meNotifs();
-    p.innerHTML = '<h4>Notifications</h4>';
-    if (!list.length) p.insertAdjacentHTML('beforeend', '<div class="hint">Nothing new.</div>');
-    for (const n of list) {
-      const d = document.createElement('div'); d.className = 'prow' + (n.read ? '' : ' unread');
-      d.innerHTML = `${n.thumb ? `<img class="nthumb" src="${esc(n.thumb)}">` : ''}<span class="t">${esc(n.text)}<small>${esc(n.time)}</small></span>`;
-      d.onclick = () => { if (n.videoId) { p.hidden = true; openVideo({ id: n.videoId, title: n.text, channel: '', thumb: n.thumb || '' }); } };
-      p.appendChild(d);
-    }
-    $('#bell-badge').hidden = true;
-  } catch (e) { p.innerHTML = `<div class="hint">Could not load notifications: ${esc(e.message)}</div>`; }
-};
+$('#acct-btn').onclick = () => { const m = $('#acct-menu'); if (!m.hidden) { m.hidden = true; return; } if (!signedIn() && !auth.accounts.length) return startLogin(); m.hidden = false; buildAcctMenu(); };
 
 // ---------- SponsorBlock ----------
 async function loadSegments(id) {
@@ -1039,6 +1024,61 @@ if (navigator.mediaSession) {
   navigator.mediaSession.setActionHandler('previoustrack', () => (video.currentTime = 0));
 }
 
+// ---------- right-click menus ----------
+const ytUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
+document.addEventListener('contextmenu', async (e) => {
+  const t = e.target;
+  const card = t.closest?.('.card, .subrow'), vidEl = t.closest?.('video'), link = t.closest?.('a[data-url]');
+  const items = [], run = {}, add = (id, label, fn, extra) => { items.push({ id, label, ...extra }); run[id] = fn; }, sep = () => items.length && items[items.length - 1].type !== 'separator' && items.push({ type: 'separator' });
+  if (card?._v) {
+    const v = card._v, w = isWatched(v.id), later = inList('watchlater', v.id);
+    add('play', 'Play', () => openVideo(v));
+    add('later', later ? 'Remove from Watch later' : 'Add to Watch later', () => toggleList('watchlater', v));
+    add('watched', w ? 'Mark as unwatched' : 'Mark as watched', () => { setWatched(v.id, !w); if (view === 'subs') renderSubs(); else card.classList.toggle('watched', !w); });
+    sep();
+    add('dlv', 'Download video', () => startDownload('video', undefined, v));
+    add('dla', 'Download audio', () => startDownload('audio', undefined, v));
+    sep();
+    add('copy', 'Copy link', () => api.copy(ytUrl(v.id)));
+    add('web', 'Open on youtube.com', () => api.openExternal(ytUrl(v.id)));
+    if (v.channelId) {
+      sep();
+      add('chan', v.channel ? `Go to ${v.channel}` : 'Go to channel', () => openChannel(v.channelId));
+      const subbed = isSub(v.channelId);
+      add('sub', subbed ? 'Unsubscribe' : 'Subscribe', () => setSub({ id: v.channelId, name: v.channel, avatar: '' }, !subbed));
+    }
+  } else if (card?._pl) {
+    const p = card._pl;
+    add('open', 'Open playlist', () => openPlaylist(p.id));
+    sep();
+    add('dlv', 'Download all (video)', () => startPlaylistDownload(p.id, p.title, 'video').then(() => toast('Playlist download started')));
+    add('dla', 'Download all (MP3)', () => startPlaylistDownload(p.id, p.title, 'audio').then(() => toast('Playlist download started')));
+    sep();
+    add('copy', 'Copy link', () => api.copy(`https://www.youtube.com/playlist?list=${p.id}`));
+    add('web', 'Open on youtube.com', () => api.openExternal(`https://www.youtube.com/playlist?list=${p.id}`));
+  } else if (vidEl && current) {
+    add('pp', video.paused ? 'Play' : 'Pause', () => (video.paused ? video.play() : video.pause()));
+    add('loop', 'Loop', () => { video.loop = !video.loop; renderToolbar(); }, { checked: video.loop });
+    add('theater', 'Theater mode', () => save({ theater: !settings.theater }), { checked: !!settings.theater });
+    add('pip', 'Picture in picture', () => TOOLS.pip.run());
+    add('mini', 'Mini player', () => api.mini(true));
+    sep();
+    add('copy', 'Copy video link', () => api.copy(ytUrl(current.id)));
+    add('copyt', 'Copy link at current time', () => api.copy(`${ytUrl(current.id)}&t=${Math.floor(video.currentTime)}`));
+    add('web', 'Open on youtube.com', () => api.openExternal(ytUrl(current.id)));
+    sep();
+    add('dlv', 'Download video', () => startDownload('video'));
+    add('dla', 'Download audio', () => startDownload('audio'));
+  } else if (link) {
+    add('open', 'Open link', () => api.openExternal(link.dataset.url));
+    add('copy', 'Copy link address', () => api.copy(link.dataset.url));
+  } else return; // text fields and selections get the standard edit menu from the main process
+  e.preventDefault();
+  while (items.length && items[items.length - 1].type === 'separator') items.pop();
+  const picked = await api.contextMenu(items);
+  if (picked) await run[picked]?.();
+});
+
 // ---------- keyboard shortcuts ----------
 document.addEventListener('keydown', (e) => {
   if (!$('#settings').hidden) { if (e.key === 'Escape') $('#settings').hidden = true; return; }
@@ -1065,7 +1105,6 @@ document.addEventListener('keydown', (e) => {
   await loadSettings(); await refreshAuth();
   video.volume = Math.min(1, Math.max(0, (settings.defaultVolume ?? 100) / 100));
   if (signedIn()) fetchSubs().catch(() => {});
-  updateNotifBadge(); setInterval(updateNotifBadge, 5 * 60 * 1000);
   const start = { subs: () => document.querySelector('#side [data-nav=subs]').click(), playlists: () => document.querySelector('#side [data-nav=playlists]').click(), history: () => document.querySelector('#side [data-nav=history]').click() }[settings.startPage];
   (start || goHome)();
 })();

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Fix: after signing in, every request failed with HTTP 400 (home, search, playback, comments, subscriptions). Public data now uses an anonymous session, and account data uses a separate session that talks to YouTube as the TV client, which is the client the sign-in token is valid for.
+- Signed in, you now get your own recommendations on Home, your subscriptions (with the full channel list), history, and all your playlists including Watch later and Liked videos.
+- Right-click menus on videos, playlists, the player, links and text fields.
+- Removed notifications and "add to YouTube history": YouTube does not serve them to this sign-in type.
+- Account name and avatar now fill in after sign-in.
+
 ## 0.1.0 (unreleased)
 
 First working version of the desktop client.

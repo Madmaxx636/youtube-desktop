@@ -30,33 +30,43 @@ const keyringOk = () => { try { return safeStorage.isEncryptionAvailable() && sa
 const seal = (o) => { const j = JSON.stringify(o); return keyringOk() ? { enc: true, data: safeStorage.encryptString(j).toString('base64') } : { enc: false, data: j }; };
 const unseal = (r) => JSON.parse(r.enc ? safeStorage.decryptString(Buffer.from(r.data, 'base64')) : r.data);
 
-let ytPromise = null, pendingLogin = null, lastInfo = null;
-function resetSession() { yt = null; ytPromise = null; lastInfo = null; }
-async function buildSession() {
-  const { Innertube } = await import('youtubei.js');
-  const st = acc.read(), a = st.accounts.find((x) => x.id === st.active);
-  const opts = { generate_session_locally: true };
-  if (a?.onBehalfOf) opts.on_behalf_of_user = a.onBehalfOf;
-  const i = await Innertube.create(opts);
-  if (a) {
-    i.session.on('update-credentials', ({ credentials }) => {
-      const s = acc.read(), x = s.accounts.find((y) => y.id === a.id);
-      if (x) { x.creds = seal(credentials); acc.write(s); }
-    });
-    await i.session.signIn(unseal(a.creds));
-  }
-  return i;
-}
+let ytPromise = null, ytAuth = null, authPromise = null, pendingLogin = null;
+function resetSession() { yt = null; ytPromise = null; ytAuth = null; authPromise = null; }
+
+// Public data (search, playback, comments, channels, public playlists) always uses an anonymous session.
+// YouTube rejects the signed-in OAuth token on the web client with HTTP 400, so attaching it to this session
+// broke every request while signed in.
 async function innertube() {
   if (yt) return yt;
-  if (!ytPromise) ytPromise = buildSession().catch((e) => { ytPromise = null; throw e; });
+  if (!ytPromise) ytPromise = import('youtubei.js').then(({ Innertube }) => Innertube.create({ generate_session_locally: true })).catch((e) => { ytPromise = null; throw e; });
   yt = await ytPromise;
   return yt;
 }
-async function authed() {
-  const i = await innertube();
-  if (!i.session.logged_in) throw new Error('Sign in first.');
+
+// Account data uses a second, signed-in session. The token comes from Google's TV device flow, so every request
+// from this session is sent as the TV client; that is the one client that accepts it.
+async function buildAuthSession() {
+  const { Innertube } = await import('youtubei.js');
+  const st = acc.read(), a = st.accounts.find((x) => x.id === st.active);
+  if (!a) throw new Error('Sign in first.');
+  const opts = { generate_session_locally: true };
+  if (a.onBehalfOf) opts.on_behalf_of_user = a.onBehalfOf;
+  const i = await Innertube.create(opts);
+  i.session.on('update-credentials', ({ credentials }) => {
+    const s2 = acc.read(), x = s2.accounts.find((y) => y.id === a.id);
+    if (x) { x.creds = seal(credentials); acc.write(s2); }
+  });
+  await i.session.signIn(unseal(a.creds));
+  const exec = i.actions.execute.bind(i.actions);
+  i.actions.execute = (endpoint, args = {}) => exec(endpoint, { ...args, client: 'TV' });
   return i;
+}
+async function authed() {
+  if (!acc.read().active) throw new Error('Sign in first.');
+  if (ytAuth) return ytAuth;
+  if (!authPromise) authPromise = buildAuthSession().catch((e) => { authPromise = null; throw e; });
+  ytAuth = await authPromise;
+  return ytAuth;
 }
 async function whoami(i) {
   try {
@@ -64,6 +74,62 @@ async function whoami(i) {
     const it = info.contents?.contents?.[0] || info.contents;
     return { name: txt(it?.account_name) || 'Google account', avatar: thumb(it?.account_photo) };
   } catch { return { name: 'Google account', avatar: '' }; }
+}
+
+// ---------- TV-client responses (subscriptions, history, playlists, personalized home) ----------
+const rt = (x) => x?.simpleText ?? (x?.runs || []).map((r) => r.text).join('');
+function tilesOf(data) {
+  const out = [];
+  const walk = (o) => { if (!o || typeof o !== 'object') return; if (o.tileRenderer) { out.push(o.tileRenderer); return; } for (const v of Object.values(o)) walk(v); };
+  walk(data);
+  return out;
+}
+// Browse a TV page and follow its continuation token for a few more pages.
+async function tvPages(i, browseId, maxPages = 3) {
+  const all = [];
+  let res = await i.actions.execute('/browse', { browseId });
+  for (let n = 0; ; n++) {
+    all.push(...tilesOf(res.data));
+    if (n + 1 >= maxPages) break;
+    const tok = /"nextContinuationData":\{"continuation":"([^"]+)"/.exec(JSON.stringify(res.data))?.[1];
+    if (!tok) break;
+    res = await i.actions.execute('/browse', { continuation: tok });
+  }
+  return all;
+}
+const tileLines = (t) => (t.metadata?.tileMetadataRenderer?.lines || []).map((l) => (l.lineRenderer?.items || []).map((x) => rt(x.lineItemRenderer?.text)).filter((s) => s && s !== '•'));
+const tileThumb = (t) => (t.header?.tileHeaderRenderer?.thumbnail?.thumbnails || []).slice(-1)[0]?.url || '';
+function tileVideo(t) {
+  const type = t.contentType;
+  if (type !== 'TILE_CONTENT_TYPE_VIDEO' && type !== 'TILE_CONTENT_TYPE_SHORTS') return null;
+  const id = t.onSelectCommand?.watchEndpoint?.videoId || t.onSelectCommand?.reelWatchEndpoint?.videoId || t.contentId;
+  if (!/^[\w-]{11}$/.test(id || '')) return null;
+  const lines = tileLines(t), flat = lines.flat();
+  const published = flat.find((x) => /\bago\b|^(streamed|premiered)/i.test(x)) || '';
+  const views = flat.find((x) => /\b(views?|watching)\b/i.test(x)) || '';
+  const first = lines[0]?.[0] || '';
+  const duration = (t.header?.tileHeaderRenderer?.thumbnailOverlays || []).map((o) => rt(o.thumbnailOverlayTimeStatusRenderer?.text)).find(Boolean) || '';
+  return {
+    id, title: rt(t.metadata?.tileMetadataRenderer?.title), channel: first && first !== views && first !== published ? first : '',
+    channelId: /"browseId":"(UC[\w-]{22})"/.exec(JSON.stringify(t))?.[1] || '', channelThumb: '',
+    views, published, duration, thumb: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, isShort: type === 'TILE_CONTENT_TYPE_SHORTS',
+  };
+}
+const tileVideos = (tiles) => { const seen = new Set(); return tiles.map(tileVideo).filter((v) => v && !seen.has(v.id) && seen.add(v.id)); };
+function tilePlaylist(t) {
+  if (t.contentType !== 'TILE_CONTENT_TYPE_PLAYLIST' || !t.contentId) return null;
+  return { id: t.contentId, title: rt(t.metadata?.tileMetadataRenderer?.title), count: '', meta: tileLines(t).flat().join(' • '), thumb: tileThumb(t) };
+}
+function tileChannel(t) {
+  if (t.contentType !== 'TILE_CONTENT_TYPE_CHANNEL' || !/^UC[\w-]{22}$/.test(t.contentId || '')) return null;
+  const l = tileLines(t).flat();
+  return { id: t.contentId, name: rt(t.metadata?.tileMetadataRenderer?.title), handle: l[0] || '', avatar: tileThumb(t) };
+}
+const PRIVATE_LISTS = { WL: 'Watch later', LL: 'Liked videos' };
+async function privatePlaylist(id) {
+  const i = await authed();
+  const vids = tileVideos(await tvPages(i, 'VL' + id, 12));
+  return { id, title: PRIVATE_LISTS[id] || 'Playlist', author: 'You', total: String(vids.length), videos: vids };
 }
 const publicAccounts = () => { const st = acc.read(); return { active: st.active, encrypted: keyringOk(), accounts: st.accounts.map((a) => ({ id: a.id, name: a.name, avatar: a.avatar, channel: a.channelName || '' })) }; };
 const pushAuth = (m) => win?.webContents.send('auth', m);
@@ -257,6 +323,10 @@ function runJob(key, url, args, { playlist = false } = {}) {
 
 const handlers = {
   async 'yt:home'(seeds) {
+    // Signed in: your real recommendations from the TV home page.
+    if (acc.read().active) {
+      try { const mine = tileVideos(await tvPages(await authed(), 'FEwhat_to_watch', 2)); if (mine.length >= 8) return mine; } catch {}
+    }
     const i = await innertube();
     const feed = await i.getHomeFeed();
     let vids = collectVideos(feed.contents?.contents || feed.contents || []);
@@ -283,7 +353,6 @@ const handlers = {
   async 'yt:video'(id) {
     const i = await innertube();
     const info = await i.getInfo(id);
-    lastInfo = { id, info };
     const b = info.basic_info;
     const related = collectVideos(info.watch_next_feed || []);
     return {
@@ -325,7 +394,18 @@ const handlers = {
     return runJob(id, `https://www.youtube.com/watch?v=${id}`, downloadArgs(kind, opts || {}));
   },
   // ----- sign-in -----
-  'auth:status'() { return publicAccounts(); },
+  'auth:status'() {
+    // Right after sign-in the account name can be missing; fill it in the background and tell the UI when it arrives.
+    const st = acc.read(), a = st.accounts.find((x) => x.id === st.active);
+    if (a && a.name === 'Google account') {
+      authed().then(whoami).then((w) => {
+        if (w.name === 'Google account') return;
+        const s2 = acc.read(), x = s2.accounts.find((y) => y.id === a.id);
+        if (x) { x.name = w.name; if (w.avatar) x.avatar = w.avatar; acc.write(s2); pushAuth({ state: 'update', ...publicAccounts() }); }
+      }).catch(() => {});
+    }
+    return publicAccounts();
+  },
   async 'auth:begin'() {
     const { Innertube } = await import('youtubei.js');
     const i = await Innertube.create({ generate_session_locally: true });
@@ -359,11 +439,13 @@ const handlers = {
   // Brand accounts / channels under the signed-in Google account.
   async 'auth:channels'() {
     const i = await authed();
-    const items = await i.account.getInfo(true);
+    const x = await i.actions.execute('/account/accounts_list', { requestType: 'ACCOUNTS_LIST_REQUEST_TYPE_CHANNEL_SWITCHER', callCircumstance: 'SWITCHING_USERS_FULL' });
+    const items = [];
+    const walk = (o) => { if (!o || typeof o !== 'object') return; if (o.accountItem) { items.push(o.accountItem); return; } for (const v of Object.values(o)) walk(v); };
+    walk(x.data);
     return items.map((it) => {
-      const tokens = it.endpoint?.payload?.supportedTokens || [];
-      const ds = tokens.map((t) => t.datasyncIdToken?.datasyncIdToken).find(Boolean) || '';
-      return { name: txt(it.account_name), handle: txt(it.channel_handle) || txt(it.account_byline), avatar: thumb(it.account_photo), selected: !!it.is_selected, token: ds.includes('||') ? ds.split('||')[0] : '' };
+      const ds = /"datasyncIdToken":"([^"]+)"/.exec(JSON.stringify(it))?.[1] || '';
+      return { name: rt(it.accountName), handle: rt(it.channelHandle) || rt(it.accountByline), avatar: (it.accountPhoto?.thumbnails || []).slice(-1)[0]?.url || '', selected: !!it.isSelected, token: ds.includes('||') ? ds.split('||')[0] : '' };
     });
   },
   async 'auth:setChannel'(token, name) {
@@ -377,35 +459,14 @@ const handlers = {
   // ----- signed-in data -----
   async 'me:subs'() {
     const i = await authed();
-    let f = await i.getSubscriptionsFeed();
-    let vids = (f.videos || []).map(mapVideo).filter(Boolean);
-    for (let n = 0; n < 2 && f.has_continuation; n++) { f = await f.getContinuation(); vids = vids.concat((f.videos || []).map(mapVideo).filter(Boolean)); }
-    let channels = [];
-    try { const c = await i.getChannelsFeed(); channels = (c.channels || []).map((x) => ({ id: x.id || x.author?.id, name: txt(x.author?.name) || txt(x.title), avatar: thumb(x.author?.thumbnails || x.thumbnails) })).filter((x) => x.id); } catch {}
-    return { videos: vids, channels };
+    const [vt, ct] = await Promise.all([tvPages(i, 'FEsubscriptions', 3), tvPages(i, 'FEchannels', 2).catch(() => [])]);
+    const channels = ct.map(tileChannel).filter(Boolean);
+    const byName = new Map(channels.map((c) => [c.name, c.id]));
+    const videos = tileVideos(vt).map((v) => ({ ...v, channelId: v.channelId || byName.get(v.channel) || '' }));
+    return { videos, channels };
   },
-  async 'me:history'() {
-    const i = await authed();
-    const h = await i.getHistory();
-    return collectVideos(h.sections || h.contents?.contents || []);
-  },
-  async 'me:playlists'() {
-    const i = await authed();
-    const f = await i.getPlaylists();
-    let list = (f.playlists || []).map(mapPlaylist).filter(Boolean);
-    if (!list.length) list = collectPlaylists(f.contents?.contents || []);
-    return list;
-  },
-  async 'me:notifs'() {
-    const i = await authed();
-    const n = await i.getNotifications();
-    return (n.contents || []).map((x) => ({
-      id: x.notification_id, text: txt(x.short_message), time: txt(x.sent_time), read: !!x.read,
-      thumb: thumb(x.video_thumbnails) || thumb(x.thumbnails),
-      videoId: x.endpoint?.payload?.videoId || /[?&]v=([\w-]{11})/.exec(x.endpoint?.metadata?.url || '')?.[1] || '',
-    }));
-  },
-  async 'me:notifCount'() { const i = await authed(); return await i.getUnseenNotificationsCount(); },
+  async 'me:history'() { const i = await authed(); return tileVideos(await tvPages(i, 'FEhistory', 2)); },
+  async 'me:playlists'() { const i = await authed(); return (await tvPages(i, 'FEplaylist_aggregation', 2)).map(tilePlaylist).filter(Boolean); },
   async 'me:rate'(id, kind) {
     const i = await authed();
     if (kind === 'like') await i.interact.like(id); else if (kind === 'dislike') await i.interact.dislike(id); else await i.interact.removeRating(id);
@@ -423,17 +484,14 @@ const handlers = {
     return true;
   },
   async 'me:addToPlaylist'(playlistId, videoId) { const i = await authed(); await i.playlist.addVideos(playlistId, [videoId]); return true; },
-  async 'me:watched'(id) {
-    const i = await authed();
-    const info = lastInfo?.id === id ? lastInfo.info : await i.getInfo(id);
-    await info.addToWatchHistory();
-    return true;
-  },
 
   // ----- playlists / captions / downloads -----
   async 'yt:playlist'(id) {
+    if (PRIVATE_LISTS[id] && acc.read().active) return privatePlaylist(id);
     const i = await innertube();
-    let pl = await i.getPlaylist(id);
+    let pl;
+    try { pl = await i.getPlaylist(id); }
+    catch (e) { if (acc.read().active) return privatePlaylist(id); throw e; }
     const info = pl.info || {};
     let vids = (pl.videos || []).map(mapVideo).filter(Boolean);
     for (let n = 0; n < 20 && pl.has_continuation; n++) { pl = await pl.getContinuation(); vids = vids.concat((pl.videos || []).map(mapVideo).filter(Boolean)); }
@@ -489,6 +547,14 @@ for (const [name, fn] of Object.entries(handlers)) {
 
 function send(cmd) { win?.webContents.send('media', cmd); }
 
+// The page describes a menu; we show it natively and report which item was picked (or null if dismissed).
+ipcMain.handle('ctx:menu', (e, items) => new Promise((resolve) => {
+  let picked = null;
+  const tpl = (Array.isArray(items) ? items : []).slice(0, 40).map((it) => it.type === 'separator' ? { type: 'separator' }
+    : { label: String(it.label || ''), enabled: it.enabled !== false, ...(it.checked !== undefined ? { type: 'checkbox', checked: !!it.checked } : {}), click: () => { picked = String(it.id); } });
+  Menu.buildFromTemplate(tpl).popup({ window: BrowserWindow.fromWebContents(e.sender) || win, callback: () => resolve(picked) });
+}));
+
 function createWindow() {
   const s = store.read();
   win = new BrowserWindow({
@@ -498,6 +564,13 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   win.loadFile('src/index.html');
+  win.webContents.on('context-menu', (_e, p) => {
+    if (!p.isEditable && !p.selectionText) return;
+    const f = p.editFlags;
+    Menu.buildFromTemplate(p.isEditable
+      ? [{ role: 'cut', enabled: f.canCut }, { role: 'copy', enabled: f.canCopy }, { role: 'paste', enabled: f.canPaste }, { type: 'separator' }, { role: 'selectAll' }]
+      : [{ role: 'copy' }]).popup({ window: win });
+  });
   win.on('minimize', () => { if (cfg().miniOnMinimize && playerPlaying && !mini) toggleMini(true); });
   win.on('close', (e) => {
     store.write({ ...store.read(), bounds: win.getBounds() });
