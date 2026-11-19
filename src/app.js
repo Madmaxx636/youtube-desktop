@@ -22,7 +22,6 @@ function setWatched(ids, on) {
 // ---------- settings ----------
 const D = SCHEMA.defaults;
 const LIVE_LAYOUT = new Set(['fontSize', 'iconSize', 'toolbarSize', 'sidebarWidth', 'relatedWidth', 'gridSize']);
-const IS_WAYLAND = api.session === 'wayland';
 const THEMES = {
   dark: { bg: '#0f0f0f', bg2: '#272727', bg3: '#1a1a1a', fg: '#f1f1f1', fg2: '#aaaaaa', line: '#303030', link: '#3ea6ff' },
   light: { bg: '#ffffff', bg2: '#f2f2f2', bg3: '#fafafa', fg: '#0f0f0f', fg2: '#606060', line: '#e5e5e5', link: '#065fd4' },
@@ -34,6 +33,7 @@ const THEMES = {
 const hex2rgb = (h) => { const m = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(h || ''); return m ? [1, 2, 3].map((i) => parseInt(m[i], 16)) : [0, 0, 0]; };
 const rgb2hex = (c) => '#' + c.map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
 const mix = (a, b, t) => { const A = hex2rgb(a), B = hex2rgb(b); return rgb2hex(A.map((x, i) => x * t + B[i] * (1 - t))); };
+const IS_WAYLAND = api.session === 'wayland'; // used by settings-schema.js
 const luminance = (h) => { const [r, g, b] = hex2rgb(h); return (0.299 * r + 0.587 * g + 0.114 * b) / 255; };
 const rgba = (h, a) => `rgba(${hex2rgb(h).join(',')},${a})`;
 
@@ -64,6 +64,7 @@ function applyLayout() {
   applyCommentStyle(); placeComments(); renderPQuick(); syncLogoTitle();
   applyPlayerTheme(); document.body.classList.toggle('no-dim', settings.dimWatched === false);
   paintRc(); renderTabs(); paintBell();
+  if (settings.notifyInterval !== notifIntervalApplied) { notifIntervalApplied = settings.notifyInterval; scheduleNotifPoll(); }
   document.body.classList.toggle('no-toolbar', settings.showToolbar !== true); // the button row under the video is optional
   root.setProperty('--card-min', (settings.gridSize || 300) + 'px');
   const [gy, gx, pad] = { compact: ['14px', '10px', '10px 16px'], comfortable: ['24px', '16px', '16px 24px'], spacious: ['34px', '22px', '20px 32px'] }[settings.density] || ['24px', '16px', '16px 24px'];
@@ -1236,6 +1237,7 @@ $('#w-sub').onclick = async () => { await TOOLS.subscribe.run(); updateChannelRo
 
 async function openVideo(v, opts = {}) {
   navPush('video', { v }, { replace: !!opts.replace });
+  histTime(); histSent = null; // report where you left the previous video
   if (opts.list !== undefined) playlistCtx = opts.list; else if (!opts.keep) playlistCtx = null;
   hideEndScreen(); relatedVids = []; relAll = []; $('#rc-chips').innerHTML = ''; setChapters([]);
   current = v; segments = []; streamRetries = 0;
@@ -1683,8 +1685,8 @@ let lastSave = 0;
 function saveProgress(done) {
   if (!current || !video.duration || !isFinite(video.duration)) return;
   const p = lsGet('progress', {}); p[current.id] = { t: done ? video.duration : video.currentTime, pct: done ? 100 : (video.currentTime / video.duration) * 100 }; lsSet('progress', p);
-  // A video you only started keeps its red progress bar; it counts as watched (hidden from Subscriptions) after 90%.
-  if (!settings.pauseHistory && p[current.id].pct >= 90 && !isWatched(current.id)) setWatched(current.id, true);
+  // A video you only started keeps its red progress bar; it counts as watched (hidden from Subscriptions) once you pass the chosen share (Settings, Playback).
+  if (!settings.pauseHistory && p[current.id].pct >= (+settings.watchedAt || 50) && !isWatched(current.id)) setWatched(current.id, true);
 }
 video.addEventListener('pause', () => saveProgress()); // keep the bar accurate when you stop, not just every few seconds
 video.addEventListener('timeupdate', () => {
@@ -2086,6 +2088,21 @@ for (const ev of ['play', 'pause', 'ended', 'emptied']) video.addEventListener(e
 paintBar();
 
 
+// ---------- report playback to your YouTube history (signed in) ----------
+let histSent = null, histLastT = 0, histWarned = false;
+const histOn = () => signedIn() && !settings.pauseHistory && settings.syncHistory !== false;
+const histWarn = (e) => { if (!histWarned) { histWarned = true; toast('Could not add to your YouTube history: ' + (e?.message || e)); } };
+video.addEventListener('playing', () => {
+  if (!current || histSent === current.id || !histOn()) return;
+  histSent = current.id; histLastT = Date.now();
+  api.historyStart(current.id).catch(histWarn);
+});
+const histTime = () => { if (current && histSent === current.id && histOn() && video.currentTime > 0) api.historyTime(current.id, video.currentTime).catch(() => {}); };
+video.addEventListener('pause', histTime);
+video.addEventListener('ended', histTime);
+video.addEventListener('timeupdate', () => { if (histSent === current?.id && Date.now() - histLastT > 60000) { histLastT = Date.now(); histTime(); } });
+window.addEventListener('beforeunload', histTime);
+
 // ---------- app updates ----------
 let updDismissed = '', lastUpd = null;
 function paintUpdatePanel(u) {
@@ -2299,7 +2316,7 @@ wMenu($('#w-bell'), () => {
 });
 
 // ---------- desktop notifications ----------
-let notifTimer = 0;
+let notifTimer = 0, notifIntervalApplied;
 async function pollUploads() {
   if (settings.notifyOn === false || settings.notifyUploadsOn === false || settings.notifyUploadMode === 'off') return;
   const mode = settings.notifyUploadMode || 'bell', b = bells();
@@ -2337,7 +2354,6 @@ function showShortcuts() {
   document.body.appendChild(ov);
   ov.addEventListener('mousedown', (e) => { if (e.target === ov) ov.remove(); }); ov.querySelector('.dclose').onclick = () => ov.remove();
 }
-let prevStack = [];
 document.addEventListener('keydown', (e) => {
   const modal = $('#dmodal') || $('#hmodal');
   if (modal) { if (e.key === 'Escape' || e.key === '?') modal.remove(); return; }

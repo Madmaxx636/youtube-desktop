@@ -106,6 +106,9 @@ async function tvPages(i, browseId, maxPages = 3) {
   }
   return all;
 }
+const histInfos = new Map();
+const checkId = (id) => { if (!/^[\w-]{11}$/.test(String(id || ''))) throw new Error('Bad video id.'); return id; };
+const checkLang = (l) => { if (!/^[\w-]{2,24}$/.test(String(l || ''))) throw new Error('Bad language.'); return l; };
 const tileLines = (t) => (t.metadata?.tileMetadataRenderer?.lines || []).map((l) => (l.lineRenderer?.items || []).map((x) => rt(x.lineItemRenderer?.text)).filter((s) => s && s !== '•'));
 const tileThumb = (t) => fixUrl((t.header?.tileHeaderRenderer?.thumbnail?.thumbnails || []).slice(-1)[0]?.url);
 function tileVideo(t) {
@@ -477,6 +480,15 @@ function mapComment(cm, level = 0) {
   };
 }
 
+// The stats pings are not innertube calls, so the library does not attach the sign-in to them; do it here.
+async function statsPing(i, url, client, params) {
+  const u = new URL(url.replace('https://s.', 'https://www.'));
+  u.searchParams.set('ver', '2'); u.searchParams.set('c', client.name.toLowerCase()); u.searchParams.set('cbrver', client.version); u.searchParams.set('cver', client.version);
+  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+  const oauth = i.session.oauth;
+  if (oauth.shouldRefreshToken()) await oauth.refreshAccessToken();
+  return fetch(u, { headers: { Authorization: `Bearer ${oauth.oauth2_tokens.access_token}`, 'User-Agent': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version' } });
+}
 const handlers = {
   async 'yt:home'(seeds) {
     // Signed in: your real recommendations from the TV home page.
@@ -507,6 +519,7 @@ const handlers = {
     return i.getSearchSuggestions(q);
   },
   async 'yt:video'(id) {
+    checkId(id);
     const i = await innertube();
     const info = await i.getInfo(id);
     const b = info.basic_info;
@@ -531,6 +544,7 @@ const handlers = {
   },
   // ----- comments: pages, replies, and (signed in) reply / like -----
   async 'yt:comments'(id, sort, cont) {
+    if (!cont) checkId(id);
     let feed, first = false;
     if (cont) {
       const prev = commentFeeds.get(cont); if (!prev) throw new Error('That list expired. Reload the comments.');
@@ -637,6 +651,7 @@ const handlers = {
     return { id, name: txt(ch.metadata?.title), avatar: thumb(ch.metadata?.avatar), description: ch.metadata?.description || '', videos: vids };
   },
   async 'yt:stream'(id, quality) {
+    checkId(id);
     // YouTube no longer serves combined streams, so resolve separate video and audio URLs.
     const c = cfg();
     const q = quality || c.quality || 'auto';
@@ -645,7 +660,7 @@ const handlers = {
     return lines.length > 1 ? { video: await proxied(lines[0]), audio: await proxied(lines[1]) } : { video: await proxied(lines[0]), audio: null };
   },
   'yt:download'(id, kind, opts) {
-    if (!/^[\w-]{11}$/.test(id)) throw new Error('Bad video id.');
+    checkId(id);
     return runJob(id, `https://www.youtube.com/watch?v=${id}`, downloadArgs(kind, opts || {}));
   },
   // ----- sign-in -----
@@ -725,8 +740,11 @@ const handlers = {
   async 'me:history'() { const i = await authed(); return tileVideos(await tvPages(i, 'FEhistory', 2)); },
   async 'me:playlists'() { const i = await authed(); return (await tvPages(i, 'FEplaylist_aggregation', 2)).map(tilePlaylist).filter(Boolean); },
   async 'me:rate'(id, kind) {
+    checkId(id);
     const i = await authed();
-    if (kind === 'like') await i.interact.like(id); else if (kind === 'dislike') await i.interact.dislike(id); else await i.interact.removeRating(id);
+    // The library still sends the video as a bare string; YouTube now wants {videoId}.
+    const path = kind === 'like' ? '/like/like' : kind === 'dislike' ? '/like/dislike' : '/like/removelike';
+    await i.actions.execute(path, { target: { videoId: id } });
     return true;
   },
   async 'me:subscribe'(channelId, on) {
@@ -735,6 +753,7 @@ const handlers = {
     return true;
   },
   async 'me:comment'(id, text) {
+    checkId(id);
     const i = await authed();
     if (!String(text).trim()) throw new Error('Comment is empty.');
     await i.interact.comment(id, String(text));
@@ -759,6 +778,7 @@ const handlers = {
     };
   },
   async 'yt:subs-list'(id) {
+    checkId(id);
     const d = JSON.parse(await ytdlp(['-J', '--skip-download', '--no-playlist', `https://www.youtube.com/watch?v=${id}`]));
     const manual = Object.keys(d.subtitles || {}).filter((k) => k !== 'live_chat').map((k) => ({ lang: k, name: d.subtitles[k]?.[0]?.name || k, auto: false }));
     const autoKeys = Object.keys(d.automatic_captions || {});
@@ -767,6 +787,7 @@ const handlers = {
     return [...manual, ...auto.map((k) => ({ lang: k, name: (d.automatic_captions[k]?.[0]?.name || k).replace(/\s*\(.*\)/, '') + ' (auto)', auto: true }))];
   },
   async 'yt:subs-get'(id, lang, auto) {
+    checkId(id); checkLang(lang);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytd-subs-'));
     try {
       await ytdlp(['--skip-download', auto ? '--write-auto-subs' : '--write-subs', '--sub-langs', lang, '--sub-format', 'vtt', '--no-playlist', '-o', path.join(dir, '%(id)s.%(ext)s'), `https://www.youtube.com/watch?v=${id}`]);
@@ -806,6 +827,27 @@ const handlers = {
     return false;
   },
   'app:notify'(kind, title, body, vid) { return notify(kind, String(title || ''), String(body || ''), vid || null); },
+  // ----- adds what you watch here to your YouTube watch history (signed in) -----
+  async 'me:historyStart'(id) {
+    checkId(id);
+    const i = await authed();
+    const { Constants } = await import('youtubei.js'), tv = Constants?.CLIENTS?.TV || { NAME: 'TVHTML5', VERSION: '7.20260311.12.00' };
+    // The tracking addresses come from the normal (web) player response; the ping itself carries your signed-in session.
+    const info = await (await innertube()).getInfo(id);
+    const pt = info.page?.[0]?.playback_tracking || info.playback_tracking;
+    if (!pt?.videostats_playback_url) throw new Error('YouTube gave no playback tracking for this video.');
+    const cpn = crypto.randomBytes(12).toString('base64url').slice(0, 16), client = { name: tv.NAME, version: tv.VERSION };
+    histInfos.set(id, { pt, cpn, client }); capMap(histInfos, 20);
+    const r = await statsPing(i, pt.videostats_playback_url, client, { cpn, fmt: 251, rtn: 0, rt: 0 });
+    if (!r.ok) throw new Error('YouTube answered ' + r.status);
+    return true;
+  },
+  async 'me:historyTime'(id, seconds) {
+    const h = histInfos.get(String(id)); if (!h?.pt?.videostats_watchtime_url) return false;
+    const t = Math.max(0, +seconds || 0).toFixed(3);
+    const r = await statsPing(await authed(), h.pt.videostats_watchtime_url, h.client, { cpn: h.cpn, st: t, et: t, cmt: t, final: '1' });
+    return r.ok;
+  },
   'update:check'() { return checkUpdate(true); },
   'update:state'() { const { _assets, ...u } = upd; return { ...u, current: thisVersion(), auto: canSelfUpdate() }; },
   async 'update:install'() {
@@ -883,6 +925,7 @@ async function updateDeb() {
   const assets = upd._assets || [], deb = assets.find((a) => /_amd64\.deb$/.test(a.name)), sums = assets.find((a) => a.name === 'SHA256SUMS');
   if (!deb || !sums) throw new Error('This release has no .deb to install.');
   const dir = path.join(os.tmpdir(), 'youtube-desktop-update'); fs.mkdirSync(dir, { recursive: true });
+  if (!/^[\w.+-]+$/.test(deb.name) || !String(deb.browser_download_url).startsWith(`https://github.com/${UPDATE_REPO}/releases/download/`)) throw new Error('The release lists an unexpected download address, so it was not used.');
   const file = path.join(dir, deb.name);
   const r = await fetch(deb.browser_download_url, { headers: { 'User-Agent': 'youtube-desktop-updater' } });
   if (!r.ok) throw new Error('Download failed (' + r.status + ')');
@@ -943,7 +986,10 @@ function createWindow() {
     store.write({ ...store.read(), bounds: win.getBounds() });
     if (!quitting && store.read().closeToTray) { e.preventDefault(); win.hide(); }
   });
-  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url) && !HIDDEN) shell.openExternal(url); return { action: 'deny' }; });
+  // The window only ever shows the app's own pages; anything else that tries to navigate it goes to the browser instead.
+  const stay = (e, url) => { if (!url.startsWith('file://')) { e.preventDefault(); if (/^https:\/\//.test(url) && !HIDDEN) shell.openExternal(url); } };
+  win.webContents.on('will-navigate', stay); win.webContents.on('will-redirect', stay);
 }
 
 function toggleMini(on) {
@@ -1001,6 +1047,8 @@ try {
 
 app.whenReady().then(() => {
   if (lockLost) return;
+  // Nothing in the app needs camera, microphone, location and so on: refuse every permission except full screen.
+  require('electron').session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'fullscreen'));
   scheduleUpdateChecks();
   createWindow();
   if (HIDDEN) return;

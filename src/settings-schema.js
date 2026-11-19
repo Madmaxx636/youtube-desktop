@@ -11,7 +11,7 @@ const SCHEMA = {
   defaults: {
     startPage: 'home', logoGoes: 'home', chaptersPlace: 'side', sidePanel: true, relatedChips: true, tabsBar: true, classicMode: 'auto', notifyOn: true, notifyWhen: 'background', notifySound: true, notifyUploadsOn: true, notifyUploadMode: 'bell', notifyInterval: 30, notifySleep: true, notifyQueue: true, notifyUpdate: true, notifyPlaying: false, autoUpdateCheck: true, playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
     commentsPlace: 'below', commentsSideHeight: 75, commentsAuto: true, commentsSortDefault: 'TOP_COMMENTS', commentsSize: 100, commentsDensity: 'comfortable', commentsLines: '5', commentsAvatars: true, commentsLikes: true, commentsBadges: true, commentsActions: true, commentsBlock: '', commentsHideLinks: false, composerStyle: 'expand', composerSubmit: 'ctrl', composerConfirm: true, composerDrafts: true, composerCounter: true, afterPost: 'newest',
-    autoplayMode: 'endless', endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
+    autoplayMode: 'endless', watchedAt: '50', syncHistory: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
     quality: 'auto', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
     dlContainer: 'mp4', dlMaxHeight: '1080', dlCodec: 'auto', dlFps: '0', dlAudioFormat: 'mp3', dlAudioQuality: '0',
     dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
@@ -50,6 +50,7 @@ const SCHEMA = {
     ] },
     { id: 'playback', label: 'Playback', groups: [
       { title: 'Behavior', items: [
+        { key: 'watchedAt', type: 'select', label: 'Mark a video as watched once I have seen', options: opt(['1', 'Any of it (as soon as it starts)'], ['25', '25%'], ['50', '50%'], ['75', '75%'], ['90', '90%']), hint: 'Watched videos are hidden from Subscriptions when "hide watched" is on. Until then they keep their red progress bar.' },
         { key: 'autoplayMode', type: 'select', label: 'Autoplay', options: opt(['endless', 'Endless: keep playing the suggested videos'], ['queue', 'Only when there is a queue or a playlist'], ['off', 'Off: stop after each video']), hint: 'Endless goes on into the next suggested video. The second option moves on only through your queue (tabs) or the playlist you started from, then stops.' },
         { key: 'endScreen', type: 'toggle', label: 'Show suggested videos when a video ends', hint: 'With autoplay on, a short countdown runs that you can cancel.' },
         { key: 'endGrid', type: 'select', label: 'Suggestions on the end screen', options: opt(['3x1', 'One row of 3 (like YouTube)'], ['2x2', '2 × 2'], ['3x3', '3 × 3'], ['4x4', '4 × 4']), hint: 'You can also switch on the end screen itself.', when: (s) => s.endScreen !== false },
@@ -272,6 +273,7 @@ const SCHEMA = {
       ] },
       { title: 'Local data', items: [
         { key: 'pauseHistory', type: 'toggle', label: 'Pause watch history', hint: 'Stops recording what you watch in this app. Your YouTube history is not affected.' },
+        { key: 'syncHistory', type: 'toggle', label: 'Add what I watch here to my YouTube history (signed in)', hint: 'Sends YouTube the usual playback report so videos show in your history on the web. Off while "Pause watch history" is on.' },
         { type: 'button', label: 'Clear watch history and progress', action: 'clearHistory', danger: true },
         { type: 'button', label: 'Clear local subscriptions', action: 'clearSubs', danger: true },
       ] },
