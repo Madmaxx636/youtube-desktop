@@ -856,3 +856,9 @@ body.classic .pillbtn{border-radius:3px}
 .up-mode{padding:5px 8px;border-radius:8px;background:var(--bg3);color:var(--fg);font-size:13px;margin-left:6px;border:0}
 .pc-chap{margin-left:0!important}
 #pbar.q-right #pc-chap{order:3}
+/* seek-bar hover preview */
+#ptip{padding:0;overflow:hidden;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.5)}
+#ptip .pprev{background-color:#000;background-repeat:no-repeat}
+#ptip .pt-time{padding:5px 10px 0;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+#ptip .pt-chap{padding:0 10px 6px;font-size:12px;opacity:.85;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+#ptip .pt-time:last-child{padding-bottom:6px}

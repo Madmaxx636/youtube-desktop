@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   channelInfo: (id) => call('yt:channelInfo', id),
   channelTab: (id, tab, sort, cont) => call('yt:channelTab', id, tab, sort, cont),
   meProgress: () => call('me:progress'),
-  stream: (id, q) => call('yt:stream', id, q),
+  stream: (id, q, force, safe) => call('yt:stream', id, q, force, safe),
   download: (id, kind, opts) => call('yt:download', id, kind, opts),
   openDownloads: () => call('app:openDownloads'),
   relaunch: () => call('app:relaunch'),

@@ -1,7 +1,7 @@
 // Declarative settings: each tab lists groups of controls. The panel renderer in app.js builds the UI from
 // this, and DEFAULTS is the single source for first-run values.
 const opt = (...pairs) => pairs.map((p) => (Array.isArray(p) ? p : [String(p), String(p)]));
-const RES = opt(['auto', 'Auto (up to 1080p)'], ['best', 'Highest available'], ['2160', '2160p (4K)'], ['1440', '1440p'], ['1080', '1080p'], ['720', '720p'], ['480', '480p'], ['360', '360p'], ['240', '240p'], ['144', '144p'], ['audio', 'Audio only']);
+const RES = opt(['auto', 'Highest available (maximum bitrate)'], ['2160', '2160p (4K)'], ['1440', '1440p'], ['1080', '1080p'], ['720', '720p'], ['480', '480p'], ['360', '360p'], ['240', '240p'], ['144', '144p'], ['audio', 'Audio only']);
 const DL_RES = opt(['0', 'Highest available'], ['2160', '2160p (4K)'], ['1440', '1440p'], ['1080', '1080p'], ['720', '720p'], ['480', '480p'], ['360', '360p']);
 const CODECS = opt(['auto', 'Automatic'], ['avc1', 'H.264 (AVC)'], ['vp9', 'VP9'], ['av01', 'AV1']);
 const THEME_LIST = opt(['auto', 'Match system'], ['dark', 'Dark'], ['light', 'Light'], ['amoled', 'AMOLED black'], ['nord', 'Nord'], ['dracula', 'Dracula'], ['solarized', 'Solarized dark'], ['custom', 'Custom colors…']);
@@ -9,10 +9,10 @@ const SB_CATS = [['sponsor', 'Sponsor'], ['selfpromo', 'Self promotion'], ['inte
 
 const SCHEMA = {
   defaults: {
-    startPage: 'home', logoGoes: 'home', chaptersPlace: 'side', sidePanel: true, relatedChips: true, tabsBar: true, classicMode: 'auto', notifyOn: true, notifyWhen: 'background', notifySound: true, notifyUploadsOn: true, notifyUploadMode: 'bell', notifyInterval: 30, notifySleep: true, notifyQueue: true, notifyUpdate: true, notifyPlaying: false, autoUpdateCheck: true, playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
+    startPage: 'home', logoGoes: 'home', chaptersPlace: 'side', sidePanel: true, relatedChips: true, tabsBar: true, classicMode: 'auto', notifyOn: true, notifyWhen: 'background', notifySound: true, notifyUploadsOn: true, notifyUploadMode: 'bell', notifyInterval: 30, notifySleep: true, notifyQueue: true, notifyUpdate: true, notifyPlaying: false, autoUpdateCheck: true, playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, seekPreview: true, stableAudio: 'levels', stableBoost: true, stableCompress: 'strong', dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
     commentsPlace: 'below', commentsSideHeight: 75, commentsAuto: true, commentsSortDefault: 'TOP_COMMENTS', commentsSize: 100, commentsDensity: 'comfortable', commentsLines: '5', commentsAvatars: true, commentsLikes: true, commentsBadges: true, commentsActions: true, commentsBlock: '', commentsHideLinks: false, composerStyle: 'expand', composerSubmit: 'ctrl', composerConfirm: true, composerDrafts: true, composerCounter: true, afterPost: 'newest',
     autoplayMode: 'endless', watchedAt: '50', syncHistory: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
-    quality: 'auto', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
+    quality: 'auto', maxBitrate: true, fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
     dlContainer: 'mp4', dlMaxHeight: '1080', dlCodec: 'auto', dlFps: '0', dlAudioFormat: 'mp3', dlAudioQuality: '0',
     dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
     dlTemplate: '%(title)s [%(id)s].%(ext)s', dlRateLimit: '', dlFragments: '4', dlPlaylistFolders: true, dlNotify: true,
@@ -71,6 +71,7 @@ const SCHEMA = {
         { key: 'quality', type: 'select', label: 'Resolution', options: RES },
         { key: 'fps', type: 'select', label: 'Frame rate limit', options: opt(['0', 'No limit'], ['30', '30 fps'], ['60', '60 fps']) },
         { key: 'codec', type: 'select', label: 'Video codec', options: CODECS, hint: 'Automatic uses H.264 up to 1080p for the smoothest playback.' },
+        { key: 'maxBitrate', type: 'toggle', label: 'Always pick the highest-bitrate stream', hint: 'At the chosen resolution, take the format with the most video and audio data (playback and downloads). Turn off to let yt-dlp prefer newer, smaller codecs.' },
         { key: 'maxVideoBitrate', type: 'select', label: 'Video bitrate limit', options: opt(['0', 'No limit'], ['1000', '1 Mbps'], ['2500', '2.5 Mbps'], ['5000', '5 Mbps'], ['8000', '8 Mbps'], ['15000', '15 Mbps']) },
       ] },
       { title: 'Buffering', hint: 'Streams go through a small local cache that downloads ahead in steady chunks. This smooths out stutters from slow or throttled connections.', items: [
@@ -79,6 +80,9 @@ const SCHEMA = {
       ] },
       { title: 'Audio', items: [
         { key: 'audioCodec', type: 'select', label: 'Audio codec', options: opt(['auto', 'Automatic'], ['aac', 'AAC'], ['opus', 'Opus']) },
+        { key: 'stableAudio', type: 'select', label: 'Stable audio', options: opt(['off', 'Off'], ['levels', 'Even out loudness between videos'], ['compress', 'Also even out loud and quiet parts inside a video']), hint: 'Uses the loudness YouTube reports for each video. Nothing changes the file you download.' },
+        { key: 'stableBoost', type: 'toggle', label: 'Also lift videos that are too quiet (up to 6 dB)', when: (s) => s.stableAudio !== 'off' },
+        { key: 'stableCompress', type: 'select', label: 'Squeeze strength', options: opt(['light', 'Light'], ['strong', 'Strong (night listening)']), when: (s) => s.stableAudio === 'compress' },
         { key: 'maxAudioBitrate', type: 'select', label: 'Audio bitrate limit', options: opt(['0', 'No limit'], ['64', '64 kbps'], ['96', '96 kbps'], ['128', '128 kbps'], ['160', '160 kbps']) },
       ] },
     ] },
@@ -145,6 +149,7 @@ const SCHEMA = {
         { key: 'playerTheme', type: 'select', label: 'Player theme', options: opt(['modern', 'Modern (like YouTube today, blue)'], ['youtube', 'YouTube (dark fade, red)'], ['classic', 'Classic (solid bar, blue)'], ['glass', 'Glass (floating, blurred)'], ['minimal', 'Minimal (thin line)'], ['amoled', 'AMOLED black (green)'], ['light', 'Light (white bar)']) },
         { key: 'playerAccentOn', type: 'toggle', label: 'Use my own accent color for the player' },
         { key: 'playerAccent', type: 'color', label: 'Player accent color', when: (s) => s.playerAccentOn },
+        { key: 'seekPreview', type: 'toggle', label: 'Show a picture of the video when hovering over the seek bar' },
         { key: 'pbAutoplay', type: 'toggle', label: 'Autoplay switch in the player bar' },
         { key: 'pbSide', type: 'select', label: 'Theater, captions, sleep and quality buttons sit', options: opt(['left', 'Next to the volume'], ['right', 'Next to full screen']) },
       ] },

@@ -39,6 +39,7 @@ const rgba = (h, a) => `rgba(${hex2rgb(h).join(',')},${a})`;
 
 async function loadSettings() {
   const stored = await api.getSettings();
+  if (stored.quality === 'best') stored.quality = 'auto'; // 'Highest available' is now the automatic choice
   if (stored.autoplayMode === undefined && stored.autoplayNext === false) stored.autoplayMode = 'off'; // older versions had an on/off switch only
   settings = { ...D, ...stored };
   applySettings();
@@ -64,6 +65,7 @@ function applyLayout() {
   applyCommentStyle(); placeComments(); renderPQuick(); syncLogoTitle();
   applyPlayerTheme(); document.body.classList.toggle('no-dim', settings.dimWatched === false);
   paintRc(); renderTabs(); paintBell();
+  applyStableAudio();
   if (settings.notifyInterval !== notifIntervalApplied) { notifIntervalApplied = settings.notifyInterval; scheduleNotifPoll(); }
   document.body.classList.toggle('no-toolbar', settings.showToolbar !== true); // the button row under the video is optional
   root.setProperty('--card-min', (settings.gridSize || 300) + 'px');
@@ -1193,12 +1195,16 @@ function setSpeed(s) {
   if (settings.rememberSpeed) save({ speed });
   else renderToolbar();
 }
-async function loadStream(id, quality, keepTime) {
+async function loadStream(id, quality, keepTime, safe) {
   const t = keepTime ?? 0;
-  const s = await api.stream(id, quality);
+  const s = await api.stream(id, quality, !!sa.ctx || (settings.stableAudio || 'off') !== 'off', !!safe);
   audio.pause(); audio.removeAttribute('src'); audioActive = false;
+  // Streams through the local cache are readable by Web Audio; direct ones are not (and the attribute would stop them loading).
+  const local = /^http:\/\/127\.0\.0\.1/.test(s.video || s.audio || '');
+  if (local) { video.crossOrigin = 'anonymous'; audio.crossOrigin = 'anonymous'; } else { video.removeAttribute('crossorigin'); audio.removeAttribute('crossorigin'); }
   video.src = s.video || s.audio;
   if (s.video && s.audio) { audio.src = s.audio; audioActive = true; }
+  applyStableAudio();
   video.addEventListener('loadedmetadata', () => {
     if (t) video.currentTime = t;
     video.playbackRate = speed;
@@ -1209,7 +1215,7 @@ async function loadStream(id, quality, keepTime) {
 
 // Video and audio arrive as separate streams, so a hidden <audio> element follows the video.
 const audio = new Audio();
-audio.preload = 'auto';
+audio.preload = 'auto'; audio.crossOrigin = 'anonymous';
 let audioActive = false;
 function syncAudio(hard) {
   if (!audioActive) return;
@@ -1225,6 +1231,41 @@ video.addEventListener('seeked', () => syncAudio(true));
 video.addEventListener('ratechange', () => syncAudio(false));
 video.addEventListener('volumechange', () => syncAudio(false));
 setInterval(() => { if (audioActive && !video.paused) syncAudio(false); }, 1000);
+// ---------- stable audio: even out the loudness ----------
+// 'levels' trims loud videos (and, if allowed, lifts quiet ones) to a common loudness using the level YouTube reports for the video.
+// 'compress' also squeezes the loud and quiet parts of one video closer together (good for late-night listening).
+// Everything runs through a limiter so a lifted video can't clip. The graph is built the first time it is needed.
+const sa = { ctx: null };
+const COMP = { light: { th: -26, knee: 24, ratio: 3.5, atk: 0.004, rel: 0.25, make: 3 }, strong: { th: -34, knee: 20, ratio: 8, atk: 0.003, rel: 0.2, make: 7 } };
+function ensureAudioGraph() {
+  if (sa.ctx) return true;
+  try {
+    const ctx = new AudioContext();
+    sa.norm = ctx.createGain(); sa.comp = ctx.createDynamicsCompressor(); sa.make = ctx.createGain(); sa.lim = ctx.createDynamicsCompressor();
+    sa.lim.threshold.value = -2; sa.lim.knee.value = 0; sa.lim.ratio.value = 20; sa.lim.attack.value = 0.002; sa.lim.release.value = 0.1;
+    for (const el of [video, audio]) ctx.createMediaElementSource(el).connect(sa.norm);
+    sa.norm.connect(sa.comp); sa.comp.connect(sa.make); sa.make.connect(sa.lim); sa.lim.connect(ctx.destination);
+    sa.ctx = ctx; return true;
+  } catch { sa.ctx = null; return false; }
+}
+function applyStableAudio() {
+  const mode = settings.stableAudio || 'off';
+  if (mode === 'off' && !sa.ctx) return;
+  if (!ensureAudioGraph()) return;
+  const ctx = sa.ctx; if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  let g = 1;
+  if (mode !== 'off' && typeof current?.loudnessDb === 'number') {
+    const boost = settings.stableBoost === false ? 0 : 6, db = Math.max(-24, Math.min(boost, -14 - current.loudnessDb)); // YouTube's reference level is -14
+    g = Math.pow(10, db / 20);
+  }
+  sa.norm.gain.setTargetAtTime(g, ctx.currentTime, 0.05);
+  const c = mode === 'compress' ? COMP[settings.stableCompress === 'light' ? 'light' : 'strong'] : null;
+  sa.comp.threshold.setTargetAtTime(c ? c.th : 0, ctx.currentTime, 0.05); sa.comp.knee.value = c ? c.knee : 0; sa.comp.ratio.value = c ? c.ratio : 1;
+  sa.comp.attack.value = c ? c.atk : 0.003; sa.comp.release.value = c ? c.rel : 0.25;
+  sa.make.gain.setTargetAtTime(c ? Math.pow(10, c.make / 20) : 1, ctx.currentTime, 0.05);
+}
+for (const ev of ['play', 'playing']) video.addEventListener(ev, () => { if (sa.ctx?.state === 'suspended') sa.ctx.resume().catch(() => {}); });
+
 
 function updateChannelRow() {
   if (!current) return;
@@ -1274,7 +1315,7 @@ async function openVideo(v, opts = {}) {
     $('#w-stats').textContent = [info.views != null ? fmtNum(info.views) + ' views' : '', info.relative || info.published].filter(Boolean).join(' • ');
     $('#w-desc-text').innerHTML = rich(info.description || '');
     $('#desc-toggle').hidden = $('#w-desc-text').scrollHeight < 72; // short descriptions need no toggle
-    updateChannelRow(); renderToolbar();
+    updateChannelRow(); renderToolbar(); applyStableAudio();
     relAll = info.related; relChip = 'all'; paintRelated();
     setChapters(info.chapters?.length ? info.chapters : parseChapters(info.description));
     relatedVids = info.related.filter((x) => !x.isShort);
@@ -1713,7 +1754,8 @@ let streamRetries = 0;
 video.addEventListener('error', () => {
   if (!current || streamRetries >= 1 || !video.currentSrc) return;
   streamRetries++; toast('Reconnecting…');
-  loadStream(current.id, settings.quality || 'auto', video.currentTime || 0).catch(() => {});
+  // the retry skips the highest-bitrate pick, in case that particular stream is the one the player cannot handle
+  loadStream(current.id, settings.quality || 'auto', video.currentTime || 0, true).catch(() => {});
 });
 video.addEventListener('ended', () => {
   saveProgress(true); if (sleepEnding) return fireSleep();
@@ -1787,6 +1829,7 @@ const optLabel = (opts, v) => (opts.find(([k]) => String(k) === String(v)) || [0
 function pmRows() {
   return {
     autoplay: { title: 'Autoplay', value: () => AUTO_MODES.find(([k]) => k === autoMode())[1], opts: () => AUTO_MODES.map(([k, l]) => [k, l]), cur: () => autoMode(), pick: (v) => save({ autoplayMode: v }).then(() => { paintAuto(); renderUpNext(); }) },
+    stable: { title: 'Stable audio', value: () => ({ off: 'Off', levels: 'Even loudness', compress: 'Even + squeeze' })[settings.stableAudio || 'off'], opts: () => [['off', 'Off'], ['levels', 'Even out loudness between videos'], ['compress', 'Also even out loud and quiet parts']], cur: () => settings.stableAudio || 'off', pick: (v) => save({ stableAudio: v }) },
     ...(chapters.length ? { chapters: { title: 'Chapters', value: () => chapters[chapAt(video.currentTime || 0)]?.title || '', opts: () => chapters.map((c, i) => [String(i), c.title + '   ' + fmtDur(c.t)]), cur: () => String(chapAt(video.currentTime || 0)), pick: (v) => { video.currentTime = chapters[+v].t; video.play().catch(() => {}); } } } : {}),
     quality: { title: 'Quality', value: () => optLabel(RES, settings.quality || 'auto'), opts: () => RES, cur: () => settings.quality || 'auto', pick: (v) => TOOLS.quality.change(v) },
     speed: { title: 'Speed', value: () => speed + 'x', opts: () => TOOLS.speed.select, cur: () => String(speed), pick: (v) => setSpeed(parseFloat(v)) },
@@ -1799,7 +1842,7 @@ function pmRows() {
 const MENU_DEFAULT = ['loop', 'theater', 'pip', 'mini', 'watchlater', 'saveplaylist', 'dlmenu', 'audioonly', 'copylink', 'copytime', 'openweb', 'next'];
 const MENU_CHOICES = ['loop', 'theater', 'pip', 'mini', 'watchlater', 'saveplaylist', 'subscribe', 'dlvideo', 'dlaudio', 'dlmenu', 'copylink', 'copytime', 'openweb', 'back10', 'fwd10', 'next', 'mute', 'audioonly'];
 const menuIds = () => (Array.isArray(settings.menuActions) ? settings.menuActions : MENU_DEFAULT).filter((id) => TOOLS[id]);
-const PM_ICON = { autoplay: 'next', chapters: 'list', quality: 'sliders', speed: 'forward', captions: 'cc', sleep: 'moon', buffer: 'list' };
+const PM_ICON = { stable: 'vol', autoplay: 'next', chapters: 'list', quality: 'sliders', speed: 'forward', captions: 'cc', sleep: 'moon', buffer: 'list' };
 const PAGE_ACTIONS = new Set(['dlmenu', 'saveplaylist']);
 const TOGGLE_ACTIONS = new Set(['loop', 'theater', 'watchlater', 'audioonly', 'mute', 'subscribe']);
 const closeP = () => { $('#p-menu').hidden = true; $('#p-gear').classList.remove('open'); pmPage = 'main'; };
@@ -2061,10 +2104,22 @@ video.addEventListener('click', () => { clearTimeout(clickT); clickT = setTimeou
 video.addEventListener('dblclick', () => { clearTimeout(clickT); toggleFs(); });
 // seek bar: click or drag, with a time (and chapter) tooltip on hover
 const seekFrac = (e) => { const r = pseek.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+// Hover preview: YouTube's storyboard sheets (a grid of small frames) cut to the frame under the cursor.
+const PREVIEW_W = 200, sbSeen = new Set();
+function previewHtml(time, d) {
+  const sb = current?.storyboard; if (!sb?.url || !sb.count || settings.seekPreview === false) return '';
+  const per = sb.cols * sb.rows, idx = Math.min(sb.count - 1, Math.max(0, sb.interval ? Math.floor((time * 1000) / sb.interval) : Math.floor((time / d) * sb.count)));
+  const sheet = Math.floor(idx / per), within = idx % per, col = within % sb.cols, row = Math.floor(within / sb.cols), k = PREVIEW_W / sb.w;
+  const url = sb.url.replace('$M', sheet);
+  if (!sbSeen.has(url)) { sbSeen.add(url); if (sbSeen.size > 400) sbSeen.clear(); const im = new Image(); im.src = url; } // fetch the sheet right away
+  return `<div class="pprev" style="width:${PREVIEW_W}px;height:${Math.round(sb.h * k)}px;background-image:url('${esc(url)}');background-size:${sb.cols * sb.w * k}px ${sb.rows * sb.h * k}px;background-position:-${col * sb.w * k}px -${row * sb.h * k}px"></div>`;
+}
 const showTip = (e) => {
-  const d = vdur(); if (!d) return; const f = seekFrac(e), tip = $('#ptip'), r = pseek.getBoundingClientRect();
-  tip.hidden = false; tip.style.left = Math.min(r.width - 40, Math.max(40, f * r.width)) + 'px';
-  tip.innerHTML = fmtDur(f * d) + (chapters.length ? `<br><span style="opacity:.8">${esc(chapters[chapAt(f * d)].title)}</span>` : '');
+  const d = vdur(); if (!d) return; const f = seekFrac(e), tip = $('#ptip'), r = pseek.getBoundingClientRect(), time = f * d;
+  tip.innerHTML = previewHtml(time, d) + `<div class="pt-time">${fmtDur(time)}</div>` + (chapters.length ? `<div class="pt-chap">${esc(chapters[chapAt(time)].title)}</div>` : '');
+  tip.hidden = false;
+  const half = tip.offsetWidth / 2 + 4;
+  tip.style.left = Math.min(r.width - half, Math.max(half, f * r.width)) + 'px';
 };
 pseek.addEventListener('pointerdown', (e) => {
   if (!vdur()) return; scrubbing = true; pseek.classList.add('drag'); pseek.setPointerCapture(e.pointerId);

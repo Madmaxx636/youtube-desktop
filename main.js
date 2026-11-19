@@ -257,11 +257,14 @@ function vcodecFilter(c) {
 }
 function acodecFilter(c) { return c === 'aac' ? '[acodec^=mp4a]' : c === 'opus' ? '[acodec=opus]' : ''; }
 // Streaming format: strictest match first, then progressively looser fallbacks so something always plays.
+// Highest bitrate first: at the chosen resolution take the format with the most video and audio bitrate (yt-dlp's own
+// default order prefers newer codecs even when they carry less data).
+const sortArgs = (c) => (c.maxBitrate === false ? [] : ['-S', 'res,fps,vbr,tbr,abr,asr']);
 function streamFormat(quality, c) {
   const abr = num(c.maxAudioBitrate) ? `[abr<=${num(c.maxAudioBitrate)}]` : '';
   const ac = acodecFilter(c.audioCodec);
   if (quality === 'audio') return `ba${ac}${abr}/ba${abr}/ba`;
-  const cap = quality === 'best' ? 0 : num(quality) || 1080;
+  const cap = quality === 'best' || quality === 'auto' ? 0 : num(quality) || 0; // 'auto' now means the highest the video offers
   const h = cap ? `[height<=${cap}]` : '';
   const fps = num(c.fps) ? `[fps<=${num(c.fps)}]` : '';
   const br = num(c.maxVideoBitrate) ? `[tbr<=${num(c.maxVideoBitrate)}]` : '';
@@ -305,11 +308,11 @@ function downloadArgs(kind, o = {}, { playlist = false } = {}) {
   if (kind === 'audio') {
     const fmt = o.audioFormat || c.dlAudioFormat;
     const q = String(o.audioQuality ?? c.dlAudioQuality);
-    a.push('-f', 'ba/b', '-x', '--audio-format', /^(mp3|m4a|opus|flac|wav|vorbis|aac)$/.test(fmt) ? fmt : 'mp3');
+    a.push('-f', 'ba/b', ...sortArgs(c), '-x', '--audio-format', /^(mp3|m4a|opus|flac|wav|vorbis|aac)$/.test(fmt) ? fmt : 'mp3');
     if (/^(0|[1-9]\d{1,2}K?)$/i.test(q)) a.push('--audio-quality', /^\d+$/.test(q) && q !== '0' ? q + 'K' : q);
     if (fmt !== 'wav' && c.dlEmbedThumb) a.push('--embed-thumbnail');
   } else {
-    a.push('-f', downloadFormat(kind, o, c), '--merge-output-format', o.container || c.dlContainer);
+    a.push('-f', downloadFormat(kind, o, c), ...sortArgs(c), '--merge-output-format', o.container || c.dlContainer);
     if (c.dlEmbedSubs) a.push('--write-subs', '--embed-subs', '--sub-langs', String(c.dlSubLangs || 'en.*,en'));
     if (c.dlEmbedThumb && (o.container || c.dlContainer) !== 'webm') a.push('--embed-thumbnail');
   }
@@ -390,6 +393,9 @@ function prefetch(st, ci) {
   for (const k of [...st.chunks.keys()]) if (k < ci - 1 || k > ci + ahead + 1) st.chunks.delete(k); // keeps memory bounded
 }
 async function handleProxy(req, res) {
+  // The player runs the sound through Web Audio (stable audio), which needs the stream to be cross-origin readable.
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges' };
+  if (req.method === 'OPTIONS') { res.writeHead(204, { ...cors, 'Access-Control-Allow-Headers': 'Range', 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS' }); return res.end(); }
   const m = /^\/s\/([0-9a-f]{24})$/.exec((req.url || '').split('?')[0]);
   const st = m && streamsMap.get(m[1]);
   if (!st) { res.writeHead(404); return res.end(); }
@@ -401,7 +407,7 @@ async function handleProxy(req, res) {
     if (rg[1] === '') start = Math.max(0, size - +rg[2]); else { start = +rg[1]; if (rg[2] !== '') end = Math.min(+rg[2], size - 1); }
   }
   if (start >= size || start > end) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
-  res.writeHead(rg ? 206 : 200, { 'Content-Type': st.mime, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'no-store', ...(rg ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}) });
+  res.writeHead(rg ? 206 : 200, { ...cors, 'Content-Type': st.mime, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'no-store', ...(rg ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}) });
   let closed = false;
   const gone = new Promise((r) => res.on('close', () => { closed = true; r(); }));
   st.last = Date.now();
@@ -429,8 +435,8 @@ function ensureProxy() {
   return proxyPromise;
 }
 // Returns a loopback URL for a googlevideo URL, or the original URL if it can't be proxied.
-async function proxied(url) {
-  if (!url || cfg().bufferProxy === false) return url;
+async function proxied(url, force) {
+  if (!url || (cfg().bufferProxy === false && !force)) return url;
   let u; try { u = new URL(url); } catch { return url; }
   const size = Number(u.searchParams.get('clen'));
   if (!size || !/googlevideo\.com$/.test(u.hostname)) return url;
@@ -533,6 +539,14 @@ const handlers = {
       channelThumb: thumb(info.secondary_info?.owner?.author?.thumbnails) || '',
       subs: txt(info.secondary_info?.owner?.subscriber_count) || '',
       related,
+      loudnessDb: (() => { const v = info.page?.[0]?.player_config?.audio_config?.loudness_db; return typeof v === 'number' ? v : null; })(),
+      storyboard: (() => {
+        try {
+          const bs = (info.storyboards?.boards || []).filter((b) => b.template_url && b.thumbnail_width >= 80 && b.thumbnail_count > 0);
+          const b = bs.find((x) => x.thumbnail_width === 160) || bs[bs.length - 1]; if (!b) return null;
+          return { url: b.template_url, w: b.thumbnail_width, h: b.thumbnail_height, cols: b.columns, rows: b.rows, count: b.thumbnail_count, interval: b.interval };
+        } catch { return null; }
+      })(),
       chapters: (() => {
         try {
           const mm = info.player_overlays?.decorated_player_bar?.player_bar?.markers_map;
@@ -650,14 +664,15 @@ const handlers = {
     try { const v = await ch.getVideos(); vids = collectVideos(v.videos || v.contents?.contents || []); } catch {}
     return { id, name: txt(ch.metadata?.title), avatar: thumb(ch.metadata?.avatar), description: ch.metadata?.description || '', videos: vids };
   },
-  async 'yt:stream'(id, quality) {
+  async 'yt:stream'(id, quality, forceProxy, safe) {
     checkId(id);
     // YouTube no longer serves combined streams, so resolve separate video and audio URLs.
     const c = cfg();
     const q = quality || c.quality || 'auto';
-    const lines = (await ytdlp(['-g', '-f', streamFormat(q, c), '--no-playlist', `https://www.youtube.com/watch?v=${id}`])).trim().split('\n');
-    if (q === 'audio') return { video: null, audio: await proxied(lines[0]) };
-    return lines.length > 1 ? { video: await proxied(lines[0]), audio: await proxied(lines[1]) } : { video: await proxied(lines[0]), audio: null };
+    const lines = (await ytdlp(['-g', '-f', streamFormat(q, c), ...(safe ? [] : sortArgs(c)), '--no-playlist', `https://www.youtube.com/watch?v=${id}`])).trim().split('\n');
+    const px = (u) => proxied(u, forceProxy || (c.stableAudio && c.stableAudio !== 'off'));
+    if (q === 'audio') return { video: null, audio: await px(lines[0]) };
+    return lines.length > 1 ? { video: await px(lines[0]), audio: await px(lines[1]) } : { video: await px(lines[0]), audio: null };
   },
   'yt:download'(id, kind, opts) {
     checkId(id);
@@ -970,7 +985,7 @@ function createWindow() {
     width: 1400, height: 900, minWidth: 900, minHeight: 600,
     backgroundColor: '#0f0f0f', title: 'YouTube Desktop', autoHideMenuBar: true, show: !HIDDEN,
     ...(s.bounds || {}),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, backgroundThrottling: !HIDDEN },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: !HIDDEN },
   });
   win.loadFile('src/index.html');
   win.webContents.on('context-menu', (_e, p) => {

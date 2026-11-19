@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0
+
+- Maximum bitrate: playback and downloads now pick the highest-bitrate stream at your chosen resolution instead of yt-dlp's default order. A 4K60 test video went from about 9 Mbps (AV1) to about 28 Mbps (VP9), and the "Auto" quality now means the highest the video offers instead of stopping at 1080p. Turn it off in Settings, Video & audio ("Always pick the highest-bitrate stream"). If a stream will not play, the app reconnects once with a standard pick. Downloads still honour your own height limit (Settings, Downloads): set it to "Highest available" to go all the way.
+- Seek-bar preview: hovering or dragging on the seek bar shows a picture of the video at that moment (YouTube's own preview frames) above the time and chapter name. Switch it off in Settings, Appearance.
+- Stable audio (Settings, Video & audio, or the in-player menu): evens out loudness between videos using the level YouTube reports, trimming loud ones and (optionally, up to 6 dB) lifting quiet ones, with a limiter so nothing clips. A second mode also squeezes the loud and quiet parts of one video together (light or strong) for late-night listening. It only affects playback, not downloads. It needs the local stream cache, so the app uses it automatically while stable audio is on.
+
+
 ## 0.8.1
 
 - Clean-up release after a full code audit: unused styles, an unused icon and a leftover test hook were removed, and a record of notifications that was only meant for testing no longer grows while the app runs. A lint pass found no undefined names.
