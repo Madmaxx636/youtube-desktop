@@ -260,12 +260,21 @@ function acodecFilter(c) { return c === 'aac' ? '[acodec^=mp4a]' : c === 'opus' 
 // Streaming format: strictest match first, then progressively looser fallbacks so something always plays.
 // Highest bitrate first: at the chosen resolution take the format with the most video and audio bitrate (yt-dlp's own
 // default order prefers newer codecs even when they carry less data).
-const sortArgs = (c) => (c.maxBitrate === false ? [] : ['-S', 'res,fps,vbr,tbr,abr,asr']);
+// 'lang' goes first so the original audio always wins over dubbed tracks (the bitrate order alone picked a dub on some videos).
+const sortArgs = (c) => {
+  const f = [];
+  if (c.audioLang !== 'any') f.push('lang');
+  if (c.maxBitrate !== false) f.push('res', 'fps', 'vbr', 'tbr', 'abr', 'asr');
+  return f.length ? ['-S', f.join(',')] : [];
+};
+// A specific audio language (say "es") is asked for first; if the video has no such track the normal pick is used.
+const audioLangFilter = (c) => (/^[a-z]{2,3}(-[A-Za-z0-9]+)?$/.test(c.audioLang || '') ? `[language^=${c.audioLang}]` : '');
 function streamFormat(quality, c, perf = {}) {
   const abrCap = perf.data ? Math.min(num(c.maxAudioBitrate) || 999, 96) : num(c.maxAudioBitrate);
   const abr = abrCap && abrCap < 999 ? `[abr<=${abrCap}]` : '';
   const ac = acodecFilter(c.audioCodec);
-  if (quality === 'audio') return `ba${ac}${abr}/ba${abr}/ba`;
+  const lf = audioLangFilter(c);
+  if (quality === 'audio') return [lf && `ba${lf}${ac}${abr}`, `ba${ac}${abr}`, `ba${abr}`, 'ba'].filter(Boolean).join('/');
   let cap = quality === 'best' || quality === 'auto' ? 0 : num(quality) || 0; // 'auto' now means the highest the video offers
   // Data saver and power saving cap the picture size (and so prefer H.264 below, which most devices decode in hardware).
   const lim = Math.min(perf.data ? num(c.dataSaverRes) || 480 : Infinity, perf.power ? num(c.powerRes) || 720 : Infinity);
@@ -275,7 +284,7 @@ function streamFormat(quality, c, perf = {}) {
   const br = num(c.maxVideoBitrate) ? `[tbr<=${num(c.maxVideoBitrate)}]` : '';
   // "auto" prefers H.264 up to 1080p (best hardware decoding); above that YouTube only offers VP9/AV1.
   const vc = c.codec === 'auto' ? (cap && cap <= 1080 ? vcodecFilter('avc1') : '') : vcodecFilter(c.codec);
-  return [`bv*${h}${fps}${br}${vc}+ba${ac}${abr}`, `bv*${h}${fps}${br}+ba${abr}`, `bv*${h}${fps}+ba`, `bv*${h}+ba`, `b${h}`].join('/');
+  return [lf && `bv*${h}${fps}${br}${vc}+ba${lf}${ac}${abr}`, `bv*${h}${fps}${br}${vc}+ba${ac}${abr}`, `bv*${h}${fps}${br}+ba${abr}`, `bv*${h}${fps}+ba`, `bv*${h}+ba`, `b${h}`].filter(Boolean).join('/');
 }
 function downloadFormat(kind, o, c) {
   const cap = num(o.height ?? c.dlMaxHeight), h = cap ? `[height<=${cap}]` : '';
@@ -286,7 +295,9 @@ function downloadFormat(kind, o, c) {
   let vc = vcodecFilter(pref), ac = '';
   if (container === 'mp4') { if (pref === 'auto') vc = cap && cap <= 1080 ? vcodecFilter('avc1') : ''; ac = '[acodec^=mp4a]'; }
   else if (container === 'webm') { if (pref === 'auto') vc = vcodecFilter('vp9'); ac = '[acodec=opus]'; }
-  const chain = [`bv*${h}${fps}${vc}+ba${ac}`];
+  const lf = audioLangFilter(c), chain = [];
+  if (lf) chain.push(`bv*${h}${fps}${vc}+ba${lf}${ac}`);
+  chain.push(`bv*${h}${fps}${vc}+ba${ac}`);
   if (container === 'webm') chain.push(`bv*${h}${fps}[vcodec~='^(vp0?9|av01)']+ba${ac}`);
   chain.push(`bv*${h}${fps}${vcodecFilter(pref === 'auto' ? (cap && cap <= 1080 ? 'avc1' : '') : pref)}+ba`, `bv*${h}${fps}+ba`, `bv*${h}+ba`, `b${h}`, 'b');
   return chain.join('/');
@@ -313,7 +324,7 @@ function downloadArgs(kind, o = {}, { playlist = false } = {}) {
   if (kind === 'audio') {
     const fmt = o.audioFormat || c.dlAudioFormat;
     const q = String(o.audioQuality ?? c.dlAudioQuality);
-    a.push('-f', 'ba/b', ...sortArgs(c), '-x', '--audio-format', /^(mp3|m4a|opus|flac|wav|vorbis|aac)$/.test(fmt) ? fmt : 'mp3');
+    a.push('-f', [audioLangFilter(c) && `ba${audioLangFilter(c)}`, 'ba', 'b'].filter(Boolean).join('/'), ...sortArgs(c), '-x', '--audio-format', /^(mp3|m4a|opus|flac|wav|vorbis|aac)$/.test(fmt) ? fmt : 'mp3');
     if (/^(0|[1-9]\d{1,2}K?)$/i.test(q)) a.push('--audio-quality', /^\d+$/.test(q) && q !== '0' ? q + 'K' : q);
     if (fmt !== 'wav' && c.dlEmbedThumb) a.push('--embed-thumbnail');
   } else {

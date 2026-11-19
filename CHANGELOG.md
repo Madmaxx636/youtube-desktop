@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1
+
+- Fixed: on videos that carry dubbed audio tracks, the app could play a dub (for example Indonesian) instead of the original audio. The highest-bitrate pick added in 0.9.0 chose by bitrate alone. The original audio now always comes first.
+- New setting, Settings, Video & audio, "Audio language": Original (never a dubbed track, the default), Whatever has the highest bitrate, or a specific language (English, Spanish, French and others). If the video has no track in that language, the original is used. It applies to playback and downloads.
+
+
 ## 0.10.0
 
 - Touch / tablet mode (Settings, Performance): automatic on touch screens without a mouse, or always on or off. Bigger buttons and a taller header, nothing that needs hovering (the video menu dots, quick actions and chapter buttons are always visible), a big play button on the video, tap the picture to show or hide the controls, double-tap the left or right of the video to jump 10 seconds, swipe in from the screen edge to go back or forward, and larger menus and tabs.
