@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+- Clean-up release after a full code audit: unused styles, an unused icon and a leftover test hook were removed, and a record of notifications that was only meant for testing no longer grows while the app runs. A lint pass found no undefined names.
+- Re-tested end to end: every settings tab, all themes and skins, search, the chapters panel and bar, tabs, autoplay modes and notification rules.
+
+
 ## 0.8.0
 
 - Chapters: the current chapter's name sits in the player's control bar (click it for the full list), and the seek bar shows chapter breaks. Chapters now come with their own thumbnails.

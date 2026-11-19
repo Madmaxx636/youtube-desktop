@@ -868,7 +868,7 @@ const handlers = {
 // ---------- desktop notifications ----------
 // kind: 'upload' | 'download' | 'sleep' | 'queue' | 'update' | 'playing' | 'test'. The settings decide whether it shows,
 // and (when "only in the background" is on) whether the window is out of sight right now.
-globalThis.__notifLog = [];
+if (HIDDEN) globalThis.__notifLog = [];
 const inBackground = () => !win || win.isDestroyed() || win.isMinimized() || !win.isVisible() || !win.isFocused();
 function notify(kind, title, body, vid) {
   const c = cfg();
@@ -877,7 +877,7 @@ function notify(kind, title, body, vid) {
   if (kind !== 'test' && kinds[kind] && c[kinds[kind]] === false) return false;
   if (kind === 'playing' && c.notifyPlaying !== true) return false;
   if (kind !== 'test' && (c.notifyWhen || 'background') === 'background' && !inBackground()) return false;
-  globalThis.__notifLog.push({ kind, title, body });
+  if (HIDDEN) globalThis.__notifLog.push({ kind, title, body }); // test mode only: nothing is shown, so keep a record
   if (HIDDEN || !Notification.isSupported()) return true;
   const n = new Notification({ title, body: body || '', silent: c.notifySound === false, icon: path.join(__dirname, 'src', 'icon.png') });
   n.on('click', () => { showWin(win); if (win?.isMinimized()) win.restore(); win?.focus(); if (vid) win?.webContents.send('open-video', vid); });
@@ -891,7 +891,7 @@ function notify(kind, title, body, vid) {
 const UPDATE_REPO = 'Madmaxx636/youtube-desktop';
 const thisVersion = () => process.env.YT_FAKE_VERSION || app.getVersion();
 const cmpVer = (a, b) => { const x = String(a).replace(/^v/, '').split('.').map(Number), y = String(b).replace(/^v/, '').split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0) ? 1 : -1; } return 0; };
-const isDeb = () => !!process.env.YT_FAKE_DEB || (process.platform === 'linux' && app.isPackaged && !process.env.APPIMAGE && process.execPath.startsWith('/opt/')); // YT_FAKE_DEB is for tests
+const isDeb = () => process.platform === 'linux' && app.isPackaged && !process.env.APPIMAGE && process.execPath.startsWith('/opt/');
 const canSelfUpdate = () => isDeb() || app.isPackaged && ((process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR) || (process.platform === 'linux' && !!process.env.APPIMAGE));
 let upd = { status: 'idle', current: null };
 const pushUpd = (patch) => { upd = { ...upd, ...patch, current: thisVersion() }; const { _assets, ...pub } = upd; for (const w of [win]) if (w && !w.isDestroyed()) w.webContents.send('update', pub); return pub; };
@@ -940,11 +940,10 @@ async function updateDeb() {
   fs.rmSync(file, { force: true });
   pushUpd({ status: 'ready', via: 'deb' });
 }
-let updTimer;
 function scheduleUpdateChecks() {
   if (!app.isPackaged && !process.env.YT_FAKE_VERSION) return;
   const run = () => { if (cfg().autoUpdateCheck !== false) checkUpdate(false); };
-  setTimeout(run, 20000); updTimer = setInterval(run, 6 * 3600 * 1000);
+  setTimeout(run, 20000); setInterval(run, 6 * 3600 * 1000);
 }
 
 for (const [name, fn] of Object.entries(handlers)) {

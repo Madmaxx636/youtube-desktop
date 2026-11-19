@@ -2244,7 +2244,7 @@ function paintRelated() {
   const counts = defs.map(([k, , f]) => [k, relAll.filter(f).length]);
   if (!counts.find(([k]) => k === relChip) || (relChip !== 'all' && !counts.find(([k, n]) => k === relChip && n))) relChip = 'all';
   chips.innerHTML = '';
-  if (settings.relatedChips !== false && relAll.length) for (const [k, label, f] of defs) {
+  if (settings.relatedChips !== false && relAll.length) for (const [k, label] of defs) {
     const n = counts.find((x) => x[0] === k)[1]; if (k !== 'all' && !n) continue;
     const b = document.createElement('button'); b.className = 'rchip' + (k === relChip ? ' on' : ''); b.textContent = label; b.onclick = () => { relChip = k; paintRelated(); };
     chips.appendChild(b);

@@ -44,7 +44,6 @@ const ICON_PATHS = {
   check: '<path d="M5 12l5 5 9-10"/>',
   undo: '<path d="M3 8h11a5 5 0 0 1 0 10H8"/><path d="M7 4L3 8l4 4"/>',
   play: '<path d="M7 4l13 8-13 8z"/>',
-  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   dots: '<circle cx="12" cy="5" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="19" r="1.7" fill="currentColor"/>',
   grid: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
   rows: '<rect x="3" y="4" width="7" height="5" rx="1"/><path d="M13 5h8M13 8h5"/><rect x="3" y="15" width="7" height="5" rx="1"/><path d="M13 16h8M13 19h5"/>',
