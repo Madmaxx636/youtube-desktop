@@ -334,7 +334,7 @@ function runJob(key, url, args, { playlist = false } = {}) {
   p.on('close', (code, sig) => {
     jobs.delete(key);
     send({ pct: code === 0 ? 100 : -1, done: true, cancelled: !!sig, error: code === 0 || sig ? '' : errText.split('\n').filter((l) => /ERROR/.test(l)).pop() || '' });
-    if (!sig && !HIDDEN && cfg().dlNotify && Notification.isSupported()) new Notification({ title: code === 0 ? 'Download complete' : 'Download finished with errors', body: playlist ? `${item} of ${total} items` : key }).show();
+    if (!sig) notify('download', code === 0 ? 'Download complete' : 'Download finished with errors', playlist ? `${item} of ${total} items` : key);
   });
   return true;
 }
@@ -520,6 +520,13 @@ const handlers = {
       channelThumb: thumb(info.secondary_info?.owner?.author?.thumbnails) || '',
       subs: txt(info.secondary_info?.owner?.subscriber_count) || '',
       related,
+      chapters: (() => {
+        try {
+          const mm = info.player_overlays?.decorated_player_bar?.player_bar?.markers_map;
+          const ch = mm?.find((m) => m.marker_key === 'DESCRIPTION_CHAPTERS')?.value?.chapters || [];
+          return ch.map((c) => ({ t: (c.time_range_start_millis || 0) / 1000, title: c.title?.text || String(c.title || ''), thumb: fixUrl((c.thumbnail || [])[0]?.url || '') })).filter((c) => c.title);
+        } catch { return []; }
+      })(),
     };
   },
   // ----- comments: pages, replies, and (signed in) reply / like -----
@@ -798,6 +805,7 @@ const handlers = {
     if (f.startsWith(root + path.sep) && fs.existsSync(f)) { shell.showItemInFolder(f); return true; }
     return false;
   },
+  'app:notify'(kind, title, body, vid) { return notify(kind, String(title || ''), String(body || ''), vid || null); },
   'update:check'() { return checkUpdate(true); },
   'update:state'() { const { _assets, ...u } = upd; return { ...u, current: thisVersion(), auto: canSelfUpdate() }; },
   async 'update:install'() {
@@ -813,6 +821,27 @@ const handlers = {
   'update:restart'() { if (upd.status !== 'ready') return true; if (upd.via === 'deb') { app.relaunch(); app.exit(0); } else getUpdater().quitAndInstall(); return true; },
   'app:copy'(text) { clipboard.writeText(String(text)); return true; },
 };
+
+
+// ---------- desktop notifications ----------
+// kind: 'upload' | 'download' | 'sleep' | 'queue' | 'update' | 'playing' | 'test'. The settings decide whether it shows,
+// and (when "only in the background" is on) whether the window is out of sight right now.
+globalThis.__notifLog = [];
+const inBackground = () => !win || win.isDestroyed() || win.isMinimized() || !win.isVisible() || !win.isFocused();
+function notify(kind, title, body, vid) {
+  const c = cfg();
+  if (c.notifyOn === false) return false;
+  const kinds = { upload: 'notifyUploads', download: 'dlNotify', sleep: 'notifySleep', queue: 'notifyQueue', update: 'notifyUpdate', playing: 'notifyPlaying' };
+  if (kind !== 'test' && kinds[kind] && c[kinds[kind]] === false) return false;
+  if (kind === 'playing' && c.notifyPlaying !== true) return false;
+  if (kind !== 'test' && (c.notifyWhen || 'background') === 'background' && !inBackground()) return false;
+  globalThis.__notifLog.push({ kind, title, body });
+  if (HIDDEN || !Notification.isSupported()) return true;
+  const n = new Notification({ title, body: body || '', silent: c.notifySound === false, icon: path.join(__dirname, 'src', 'icon.png') });
+  n.on('click', () => { showWin(win); if (win?.isMinimized()) win.restore(); win?.focus(); if (vid) win?.webContents.send('open-video', vid); });
+  n.show();
+  return true;
+}
 
 // ---------- updates ----------
 // Looks at the latest GitHub release. The NSIS installer (Windows) and the AppImage can update themselves through

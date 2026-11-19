@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('api', {
   openExternal: (u) => call('app:openExternal', u),
   mini: (on) => call('app:mini', on),
   copy: (t) => call('app:copy', t),
+  notify: (kind, title, body, vid) => call('app:notify', kind, title, body, vid),
+  onOpenVideo: (cb) => ipcRenderer.on('open-video', (_e, v) => cb(v)),
   updateCheck: () => call('update:check'),
   updateState: () => call('update:state'),
   updateInstall: () => call('update:install'),

@@ -32,7 +32,7 @@ Requires `yt-dlp` and `ffmpeg`. Keep yt-dlp current: YouTube breaks old builds. 
 - Sign in with Google's device-code page, switch accounts and channels, notifications, like/dislike, subscribe
 - Mini player with size, screen corner, opacity, always-on-top and open-on-minimize settings; picture-in-picture; tray; media keys; global hotkey (Ctrl+Alt+Y)
 - Player settings menu on the video (quality, speed, subtitles, sleep timer, buffer), sleep timer, buffer-ahead cache
-- Own player control bar with six player themes, customizable player buttons, theater mode, comments in the side column or below the video, trackpad swipe for back and forward, page animations, Modern and Classic (2012) skins, themes (including custom colors), interface scale, spacing, thumbnail size, sidebar and related-video layout, custom CSS
+- Own player control bar with the chapter name and six player themes, an "In this video" panel with chapters (thumbnails, loop, share) and a clickable transcript, filter chips on the suggested videos, open several videos as tabs (middle-click or a 3-finger tap), desktop notifications for new uploads from channels you pick, customizable player buttons, theater mode, comments in the side column or below the video, trackpad swipe for back and forward, page animations, Modern and Classic (2012) skins, themes (including custom colors), interface scale, spacing, thumbnail size, sidebar and related-video layout, custom CSS
 
 All of it is configurable under Settings (gear icon).
 

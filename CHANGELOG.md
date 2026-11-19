@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.0
+
+- Chapters: the current chapter's name sits in the player's control bar (click it for the full list), and the seek bar shows chapter breaks. Chapters now come with their own thumbnails.
+- New "In this video" panel above the suggested videos, like YouTube: a Chapters tab (thumbnail, title, time; share a chapter's link or loop a chapter) and a Transcript tab (click a line to jump there; the current line follows the video). Hide it with the X, or put the chapters back under the video in Settings, Layout.
+- Suggested videos have filter chips: All, From this channel, Not watched, Under 10 min, Over 30 min.
+- Tabs: middle-click, Ctrl+click or a 3-finger tap (most touchpads send a middle click) on any video adds it to a tab strip at the top. Click a tab to switch to it (the video you leave stays as a tab), x or middle-click to close one. Turn the strip off in Settings, Layout.
+- Under the title: a bell for new-video notifications, Share (copy link, link at the current time), Save (Watch later, playlist, queue), Download and a More menu, next to the Like / Dislike pill. They collapse to icons when the page is narrow.
+- Classic skin has a dark version: it follows a dark theme, or pick Light / Dark in Settings, Appearance.
+- Autoplay has three modes (Settings, Playback; also the Autoplay box above the suggested videos, the in-player menu, and right-click on the switch in the player bar): Endless keeps going into suggested videos, "Only when there is a queue or a playlist" moves on through your queue (tabs) and the playlist you started from and then stops, and Off stops after every video. The switch in the bar turns it on or off. The Next button and Shift+N always go to the next video.
+- Fixed: playing a playlist did not continue through the playlist, because the suggested videos replaced it once the page loaded. It now plays the playlist in order (and Shuffle keeps its order).
+- Player bar cleaned up to match YouTube: the seek bar is cut into chapter segments, the chapter name sits next to the time, and the buttons on the right run captions, quality (HD tag), sleep timer, theater, ⋮, full screen. The autoplay switch shows its mode.
+- Desktop notifications (new Settings tab): new videos from channels where you turned the bell on (or every subscription), finished downloads, the sleep timer, the queue running out, the next video starting while you are away, and new app versions. They show only when the app is minimized or in the background unless you choose Always. Clicking one opens the video.
+
+
 ## 0.7.2
 
 - Fixed: closing the window left the app running in the background, so opening it again started a second copy. Closing the window now quits the app (unless "Keep running in the tray" is on, which hides the window as before).

@@ -21,6 +21,7 @@
   <button id="acct-btn" title="Sign in"><i data-ic="user"></i></button>
   <button id="settings-btn" title="Settings"><i data-ic="sliders"></i></button>
 </header>
+<div id="tabbar" hidden></div>
 <div id="layout">
   <nav id="side">
     <a data-nav="home" class="active"><i data-ic="home"></i><span>Home</span></a>
@@ -45,6 +46,7 @@
             <div class="pvol"><button id="pc-mute" class="pc" title="Mute (M)" tabindex="-1"></button><input id="pc-vol" type="range" min="0" max="1" step="0.02" tabindex="-1"></div>
             <div id="p-quick"></div>
             <span id="pc-time"></span>
+            <button id="pc-chap" class="pc-chap" title="Chapters" tabindex="-1" hidden></button>
             <span class="grow"></span>
             <button id="pc-auto" class="pc" title="Autoplay" tabindex="-1"><span class="sw"><span class="kn"></span></span></button>
             <button id="p-gear" class="p-gear" title="More: actions, quality, speed, subtitles" tabindex="-1"><i data-ic="dots"></i></button>
@@ -66,7 +68,13 @@
         <img id="w-avatar" alt="">
         <div id="w-channel-text"><a id="w-ch"></a><span id="w-subs"></span></div>
         <button id="w-sub">Subscribe</button>
+        <button id="w-bell" class="pillbtn" title="Notifications for this channel"><i data-ic="bell"></i></button>
+        <span class="grow"></span>
         <span id="rate" class="chip"><button id="r-like" title="Like"><i data-ic="up"></i><span id="r-likes"></span></button><button id="r-dislike" title="Dislike"><i data-ic="down"></i><span id="r-dislikes"></span></button></span>
+        <button id="w-share" class="pillbtn" title="Share"><i data-ic="share"></i><span class="lb">Share</span></button>
+        <button id="w-save" class="pillbtn" title="Save"><i data-ic="bookmark"></i><span class="lb">Save</span></button>
+        <button id="w-dl" class="pillbtn" title="Download"><i data-ic="download"></i><span class="lb">Download</span></button>
+        <button id="w-more" class="pillbtn" title="More"><i data-ic="dots"></i></button>
       </div>
       <div id="w-chapters" class="box" hidden></div>
       <div id="w-desc" class="box collapsed">
@@ -88,7 +96,16 @@
         <div id="c-more"></div>
       </section>
     </div>
-    <aside id="right-col"><div id="side-comments"></div><div id="related"></div></aside>
+    <aside id="right-col">
+      <div id="side-comments"></div>
+      <section id="rc-panel" class="rc-panel" hidden>
+        <header><h3>In this video</h3><button id="rc-x" title="Hide this panel" class="rc-x"><i data-ic="x"></i></button></header>
+        <div class="rc-tabs"><button data-tab="chapters">Chapters</button><button data-tab="transcript">Transcript</button></div>
+        <div id="rc-body"></div>
+      </section>
+      <div id="rc-chips"></div>
+      <div id="related"></div>
+    </aside>
   </section>
 </div>
 <div id="update-bar" hidden></div>

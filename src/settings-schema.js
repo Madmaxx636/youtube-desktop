@@ -9,9 +9,9 @@ const SB_CATS = [['sponsor', 'Sponsor'], ['selfpromo', 'Self promotion'], ['inte
 
 const SCHEMA = {
   defaults: {
-    startPage: 'home', logoGoes: 'home', autoUpdateCheck: true, playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
+    startPage: 'home', logoGoes: 'home', chaptersPlace: 'side', sidePanel: true, relatedChips: true, tabsBar: true, classicMode: 'auto', notifyOn: true, notifyWhen: 'background', notifySound: true, notifyUploadsOn: true, notifyUploadMode: 'bell', notifyInterval: 30, notifySleep: true, notifyQueue: true, notifyUpdate: true, notifyPlaying: false, autoUpdateCheck: true, playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
     commentsPlace: 'below', commentsSideHeight: 75, commentsAuto: true, commentsSortDefault: 'TOP_COMMENTS', commentsSize: 100, commentsDensity: 'comfortable', commentsLines: '5', commentsAvatars: true, commentsLikes: true, commentsBadges: true, commentsActions: true, commentsBlock: '', commentsHideLinks: false, composerStyle: 'expand', composerSubmit: 'ctrl', composerConfirm: true, composerDrafts: true, composerCounter: true, afterPost: 'newest',
-    autoplayNext: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
+    autoplayMode: 'endless', endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
     quality: 'auto', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
     dlContainer: 'mp4', dlMaxHeight: '1080', dlCodec: 'auto', dlFps: '0', dlAudioFormat: 'mp3', dlAudioQuality: '0',
     dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
@@ -50,10 +50,10 @@ const SCHEMA = {
     ] },
     { id: 'playback', label: 'Playback', groups: [
       { title: 'Behavior', items: [
-        { key: 'autoplayNext', type: 'toggle', label: 'Play the next video automatically' },
+        { key: 'autoplayMode', type: 'select', label: 'Autoplay', options: opt(['endless', 'Endless: keep playing the suggested videos'], ['queue', 'Only when there is a queue or a playlist'], ['off', 'Off: stop after each video']), hint: 'Endless goes on into the next suggested video. The second option moves on only through your queue (tabs) or the playlist you started from, then stops.' },
         { key: 'endScreen', type: 'toggle', label: 'Show suggested videos when a video ends', hint: 'With autoplay on, a short countdown runs that you can cancel.' },
         { key: 'endGrid', type: 'select', label: 'Suggestions on the end screen', options: opt(['3x1', 'One row of 3 (like YouTube)'], ['2x2', '2 × 2'], ['3x3', '3 × 3'], ['4x4', '4 × 4']), hint: 'You can also switch on the end screen itself.', when: (s) => s.endScreen !== false },
-        { key: 'autoplayDelay', type: 'select', label: 'Countdown before the next video', options: opt(['3', '3 seconds'], ['5', '5 seconds'], ['8', '8 seconds'], ['12', '12 seconds'], ['20', '20 seconds']), when: (s) => s.endScreen !== false && s.autoplayNext !== false },
+        { key: 'autoplayDelay', type: 'select', label: 'Countdown before the next video', options: opt(['3', '3 seconds'], ['5', '5 seconds'], ['8', '8 seconds'], ['12', '12 seconds'], ['20', '20 seconds']), when: (s) => s.endScreen !== false && s.autoplayMode !== 'off' },
         { key: 'resume', type: 'toggle', label: 'Resume where I left off' },
         { key: 'rememberVolume', type: 'toggle', label: 'Remember my volume and mute between sessions' },
         { key: 'rememberSpeed', type: 'toggle', label: 'Remember the speed I last used' },
@@ -152,7 +152,8 @@ const SCHEMA = {
         { key: 'dimWatched', type: 'toggle', label: 'Fade out videos I have watched', hint: 'Turn off to show watched videos normally, with just the red progress bar.' },
       ] },
       { title: 'Look', items: [
-        { key: 'skin', type: 'select', label: 'Skin', options: opt(['modern', 'Modern'], ['classic', 'Classic (2012)']), hint: 'Classic uses its own light colors and ignores the theme below.' },
+        { key: 'skin', type: 'select', label: 'Skin', options: opt(['modern', 'Modern'], ['classic', 'Classic (2012)']), hint: 'Classic has its own colors (light or dark, see the next option) and ignores the theme below.' },
+        { key: 'classicMode', type: 'select', label: 'Classic skin colors', options: opt(['auto', 'Follow the theme (dark theme gives dark Classic)'], ['light', 'Always light'], ['dark', 'Always dark']), when: (s) => s.skin === 'classic' },
         { key: 'theme', type: 'select', label: 'Theme', options: THEME_LIST },
         { key: 'accent', type: 'color', label: 'Accent color' },
         { key: 'cBg', type: 'color', label: 'Background', when: (s) => s.theme === 'custom' },
@@ -181,6 +182,10 @@ const SCHEMA = {
       ] },
       { title: 'Watch page', items: [
         { key: 'theater', type: 'toggle', label: 'Theater mode (wide player)' },
+        { key: 'sidePanel', type: 'toggle', label: 'Show the "In this video" panel (chapters and transcript) beside the video' },
+        { key: 'chaptersPlace', type: 'select', label: 'Chapters go', options: opt(['side', 'In the side panel, above the suggested videos'], ['below', 'Below the video, in the description area']) },
+        { key: 'relatedChips', type: 'toggle', label: 'Filter chips above the suggested videos' },
+        { key: 'tabsBar', type: 'toggle', label: 'Show open videos as tabs at the top (middle-click, Ctrl+click or a 3-finger tap on a video adds one)' },
         { key: 'pbTheater', type: 'toggle', label: 'Video bar: theater mode button' },
         { key: 'pbCaptions', type: 'toggle', label: 'Video bar: captions button' },
         { key: 'pbSleep', type: 'toggle', label: 'Video bar: sleep timer button' },
@@ -236,6 +241,25 @@ const SCHEMA = {
         { key: 'composerCounter', type: 'toggle', label: 'Show a character counter' },
         { key: 'afterPost', type: 'select', label: 'After I post', options: opt(['newest', 'Show newest comments so I can see mine'], ['keep', 'Keep the current sorting']) },
       ] },
+    ] },
+    { id: 'notifications', label: 'Notifications', groups: [
+      { title: 'Desktop notifications', items: [
+        { key: 'notifyOn', type: 'toggle', label: 'Show desktop notifications' },
+        { key: 'notifyWhen', type: 'select', label: 'Show them', options: opt(['background', 'Only when the app is minimized, hidden or in the background'], ['always', 'Always']), when: (s) => s.notifyOn },
+        { key: 'notifySound', type: 'toggle', label: 'Play the system notification sound', when: (s) => s.notifyOn },
+        { type: 'button', label: 'Send a test notification', action: 'testNotify' },
+      ] },
+      { title: 'What to tell me about', items: [
+        { key: 'notifyUploadsOn', type: 'toggle', label: 'New videos from my subscriptions', when: (s) => s.notifyOn },
+        { key: 'notifyUploadMode', type: 'select', label: 'Which channels', options: opt(['bell', 'Only channels where I turned the bell on (bell next to Subscribe)'], ['all', 'Every channel I subscribe to']), when: (s) => s.notifyOn && s.notifyUploadsOn },
+        { key: 'notifyInterval', type: 'select', label: 'Look for new videos every', options: opt(['10', '10 minutes'], ['30', '30 minutes'], ['60', 'Hour'], ['180', '3 hours']), when: (s) => s.notifyOn && s.notifyUploadsOn },
+        { key: 'dlNotify', type: 'toggle', label: 'A download finishes', when: (s) => s.notifyOn },
+        { key: 'notifySleep', type: 'toggle', label: 'The sleep timer pauses playback', when: (s) => s.notifyOn },
+        { key: 'notifyQueue', type: 'toggle', label: 'The queue or autoplay runs out', when: (s) => s.notifyOn },
+        { key: 'notifyPlaying', type: 'toggle', label: 'The next video starts playing in the background', when: (s) => s.notifyOn },
+        { key: 'notifyUpdate', type: 'toggle', label: 'A new version of this app is available', when: (s) => s.notifyOn },
+      ] },
+      { title: 'Notes', items: [{ type: 'info', text: 'A bell on the video page turns on new-video notifications for that channel. Clicking a notification opens the video. Nothing is sent anywhere: the app checks your subscriptions itself while it is running.' }] },
     ] },
     { id: 'integrations', label: 'Integrations', groups: [
       { title: 'SponsorBlock', items: [
