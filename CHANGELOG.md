@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2
+
+- Fixed: closing the window left the app running in the background, so opening it again started a second copy. Closing the window now quits the app (unless "Keep running in the tray" is on, which hides the window as before).
+- Only one copy can run. Opening the app while it is already running brings the existing window forward instead of starting another.
+
+
 ## 0.7.1
 
 - Settings, General, Updates is now a proper panel: your version, whether a newer one exists, what is new in it, a progress bar, and buttons to check, update and restart.

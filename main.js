@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn, execFile } = require('child_process');
 
-let win, mini, tray, yt;
+let win, mini, tray, yt, lockLost = false;
 // Test mode: nothing may appear on the user's screen (windows, tray, shortcuts, notifications, menus, browser).
 const HIDDEN = !!process.env.YT_TEST_HIDDEN;
 const showWin = (w) => { if (!HIDDEN && w && !w.isDestroyed()) w.show(); };
@@ -971,6 +971,7 @@ try {
 } catch {}
 
 app.whenReady().then(() => {
+  if (lockLost) return;
   scheduleUpdateChecks();
   createWindow();
   if (HIDDEN) return;
@@ -988,4 +989,13 @@ ipcMain.on('mini-state', (_e, s) => mini?.webContents.send('mini-state', s));
 ipcMain.on('player-state', (_e, s) => { playerPlaying = !!s.playing; mini?.webContents.send('mini-state', s); });
 app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => globalShortcut.unregisterAll());
-app.on('window-all-closed', () => { if (process.platform !== 'darwin' && quitting) app.quit(); });
+// Closing the last window really quits (the "keep running in the tray" option hides the window instead, so it never gets here).
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') { quitting = true; app.quit(); } });
+// Only one copy runs: opening the app again brings the existing window forward instead of starting another.
+if (!app.requestSingleInstanceLock()) { lockLost = true; quitting = true; app.quit(); }
+else app.on('second-instance', () => {
+  if (!win || win.isDestroyed()) { if (app.isReady()) createWindow(); return; }
+  if (HIDDEN) return;
+  if (win.isMinimized()) win.restore();
+  win.show(); win.focus();
+});
