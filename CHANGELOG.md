@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.0
+
+- Touch / tablet mode (Settings, Performance): automatic on touch screens without a mouse, or always on or off. Bigger buttons and a taller header, nothing that needs hovering (the video menu dots, quick actions and chapter buttons are always visible), a big play button on the video, tap the picture to show or hide the controls, double-tap the left or right of the video to jump 10 seconds, swipe in from the screen edge to go back or forward, and larger menus and tabs.
+- Full titles: hover a video title for about half a second and a tooltip shows the whole title (and the original title when DeArrow has replaced it).
+- Data saver (Settings, Performance): video capped at 480p by default (your choice: 240p to 720p) with a smaller audio bitrate, a 15-second buffer, and no DeArrow, dislike counts, seek-bar previews or new-video checks. Comments load only when you ask, and the suggested list is shorter.
+- Power saving / low-end mode: no animations or blur, H.264 video capped at 720p by default (your choice: 360p to 1080p), no audio processing (stable audio is skipped), a 20-second and 48 MB buffer, the player bar repainting about once a second, and slower background timers. It can turn on by itself whenever the device is on battery, or only when the battery is at 20% or less. A chip in the header shows when a mode is on.
+- Lower CPU and memory in general: the player bar only touches the page when a value changed (it used to rewrite its icons on every tick), long lists skip layout for rows that are off screen, and the stream cache is capped at 192 MB instead of 384 MB (and the 4K high-bitrate pick no longer needs the cache at all).
+
+
 ## 0.9.0
 
 - Maximum bitrate: playback and downloads now pick the highest-bitrate stream at your chosen resolution instead of yt-dlp's default order. A 4K60 test video went from about 9 Mbps (AV1) to about 28 Mbps (VP9), and the "Auto" quality now means the highest the video offers instead of stopping at 1080p. Turn it off in Settings, Video & audio ("Always pick the highest-bitrate stream"). If a stream will not play, the app reconnects once with a standard pick. Downloads still honour your own height limit (Settings, Downloads): set it to "Highest available" to go all the way.

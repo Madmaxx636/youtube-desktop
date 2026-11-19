@@ -107,6 +107,7 @@ async function tvPages(i, browseId, maxPages = 3) {
   return all;
 }
 const histInfos = new Map();
+let perfNow = { data: false, power: false }; // set by the player with each stream request (data saver, power saving)
 const checkId = (id) => { if (!/^[\w-]{11}$/.test(String(id || ''))) throw new Error('Bad video id.'); return id; };
 const checkLang = (l) => { if (!/^[\w-]{2,24}$/.test(String(l || ''))) throw new Error('Bad language.'); return l; };
 const tileLines = (t) => (t.metadata?.tileMetadataRenderer?.lines || []).map((l) => (l.lineRenderer?.items || []).map((x) => rt(x.lineItemRenderer?.text)).filter((s) => s && s !== '•'));
@@ -260,11 +261,15 @@ function acodecFilter(c) { return c === 'aac' ? '[acodec^=mp4a]' : c === 'opus' 
 // Highest bitrate first: at the chosen resolution take the format with the most video and audio bitrate (yt-dlp's own
 // default order prefers newer codecs even when they carry less data).
 const sortArgs = (c) => (c.maxBitrate === false ? [] : ['-S', 'res,fps,vbr,tbr,abr,asr']);
-function streamFormat(quality, c) {
-  const abr = num(c.maxAudioBitrate) ? `[abr<=${num(c.maxAudioBitrate)}]` : '';
+function streamFormat(quality, c, perf = {}) {
+  const abrCap = perf.data ? Math.min(num(c.maxAudioBitrate) || 999, 96) : num(c.maxAudioBitrate);
+  const abr = abrCap && abrCap < 999 ? `[abr<=${abrCap}]` : '';
   const ac = acodecFilter(c.audioCodec);
   if (quality === 'audio') return `ba${ac}${abr}/ba${abr}/ba`;
-  const cap = quality === 'best' || quality === 'auto' ? 0 : num(quality) || 0; // 'auto' now means the highest the video offers
+  let cap = quality === 'best' || quality === 'auto' ? 0 : num(quality) || 0; // 'auto' now means the highest the video offers
+  // Data saver and power saving cap the picture size (and so prefer H.264 below, which most devices decode in hardware).
+  const lim = Math.min(perf.data ? num(c.dataSaverRes) || 480 : Infinity, perf.power ? num(c.powerRes) || 720 : Infinity);
+  if (Number.isFinite(lim)) cap = cap ? Math.min(cap, lim) : lim;
   const h = cap ? `[height<=${cap}]` : '';
   const fps = num(c.fps) ? `[fps<=${num(c.fps)}]` : '';
   const br = num(c.maxVideoBitrate) ? `[tbr<=${num(c.maxVideoBitrate)}]` : '';
@@ -350,7 +355,8 @@ function runJob(key, url, args, { playlist = false } = {}) {
 // The player reads video and audio from a loopback server instead of straight from YouTube. The server pulls the
 // file in steady 2 MB ranges (the same pattern yt-dlp uses to avoid throttling) and keeps the chosen number of
 // seconds downloaded ahead of the playhead, so short network hiccups never reach the player.
-const CHUNK = 2 * 1024 * 1024, MAX_CONCURRENT = 6, MAX_AHEAD_BYTES = 384 * 1024 * 1024;
+const CHUNK = 2 * 1024 * 1024, MAX_CONCURRENT = 6;
+const maxAheadBytes = () => (perfNow.power ? 48 : perfNow.data ? 64 : 192) * 1024 * 1024; // the cache lives in memory, so keep it modest
 const PROXY_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 const streamsMap = new Map();
 let proxyPromise = null, proxyPort = 0, activeFetches = 0;
@@ -386,9 +392,9 @@ function chunk(st, ci, hi) {
   return entry.p;
 }
 function prefetch(st, ci) {
-  const secs = Math.min(600, Math.max(5, num(cfg().bufferSeconds) || 60));
+  const secs = perfNow.data ? 15 : perfNow.power ? 20 : Math.min(600, Math.max(5, num(cfg().bufferSeconds) || 60));
   const bytesPerSec = st.dur ? st.size / st.dur : 400000;
-  const ahead = Math.max(2, Math.min(Math.ceil((secs * bytesPerSec) / CHUNK), Math.floor(MAX_AHEAD_BYTES / CHUNK)));
+  const ahead = Math.max(2, Math.min(Math.ceil((secs * bytesPerSec) / CHUNK), Math.floor(maxAheadBytes() / CHUNK)));
   for (let k = 1; k <= ahead; k++) if ((ci + k) * CHUNK < st.size) chunk(st, ci + k, false).catch(() => {});
   for (const k of [...st.chunks.keys()]) if (k < ci - 1 || k > ci + ahead + 1) st.chunks.delete(k); // keeps memory bounded
 }
@@ -664,12 +670,13 @@ const handlers = {
     try { const v = await ch.getVideos(); vids = collectVideos(v.videos || v.contents?.contents || []); } catch {}
     return { id, name: txt(ch.metadata?.title), avatar: thumb(ch.metadata?.avatar), description: ch.metadata?.description || '', videos: vids };
   },
-  async 'yt:stream'(id, quality, forceProxy, safe) {
+  async 'yt:stream'(id, quality, forceProxy, safe, perf) {
     checkId(id);
     // YouTube no longer serves combined streams, so resolve separate video and audio URLs.
     const c = cfg();
     const q = quality || c.quality || 'auto';
-    const lines = (await ytdlp(['-g', '-f', streamFormat(q, c), ...(safe ? [] : sortArgs(c)), '--no-playlist', `https://www.youtube.com/watch?v=${id}`])).trim().split('\n');
+    perf = { data: !!perf?.data, power: !!perf?.power }; perfNow = perf;
+    const lines = (await ytdlp(['-g', '-f', streamFormat(q, c, perf), ...(safe || perf.data || perf.power ? [] : sortArgs(c)), '--no-playlist', `https://www.youtube.com/watch?v=${id}`])).trim().split('\n');
     const px = (u) => proxied(u, forceProxy || (c.stableAudio && c.stableAudio !== 'off'));
     if (q === 'audio') return { video: null, audio: await px(lines[0]) };
     return lines.length > 1 ? { video: await px(lines[0]), audio: await px(lines[1]) } : { video: await px(lines[0]), audio: null };

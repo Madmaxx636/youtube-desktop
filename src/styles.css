@@ -862,3 +862,53 @@ body.classic .pillbtn{border-radius:3px}
 #ptip .pt-time{padding:5px 10px 0;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
 #ptip .pt-chap{padding:0 10px 6px;font-size:12px;opacity:.85;max-width:220px;overflow:hidden;text-overflow:ellipsis}
 #ptip .pt-time:last-child{padding-bottom:6px}
+
+/* ---------- performance chip, full-title tooltip ---------- */
+#perf-chip{background:var(--accent);color:#fff;border-radius:14px;padding:4px 10px;font-size:12px;margin-right:8px;white-space:nowrap}
+#perf-chip[hidden]{display:none}
+#fulltip{position:fixed;z-index:80;max-width:380px;background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.4;white-space:pre-wrap;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+#fulltip[hidden]{display:none}
+/* long lists: skip layout and paint for rows that are off screen */
+.vrow,.lrow,.plrow,.subrow,.tr-row,.rc-row{content-visibility:auto;contain-intrinsic-size:auto 96px}
+/* power saving: nothing animates, no blur */
+body.low-power *,body.low-power *::before,body.low-power *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;backdrop-filter:none!important}
+body.low-power .p-menu,body.low-power #ptip,body.low-power #fulltip,body.low-power #update-bar{box-shadow:none}
+body.low-power #pc-vol{transition:none}
+/* touch mode */
+#p-bigplay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:76px;height:76px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;z-index:5;display:none;align-items:center;justify-content:center;padding:0}
+#p-bigplay .ico{width:36px;height:36px}
+body.touch #p-bigplay{display:flex}
+#player-box.ctl-hide #p-bigplay{opacity:0;pointer-events:none}
+#p-skip{position:absolute;top:50%;transform:translateY(-50%);z-index:5;display:flex;flex-direction:column;align-items:center;gap:4px;color:#fff;background:rgba(0,0,0,.5);border-radius:50%;width:92px;height:92px;justify-content:center;pointer-events:none;font-size:14px;font-weight:600}
+#p-skip[hidden]{display:none}
+#p-skip.l{left:10%}#p-skip.r{right:10%}
+#p-skip .ico{width:26px;height:26px}
+body.touch #top{height:64px}
+body.touch #layout{height:calc(100% - 64px - var(--tabs-h,0px))}
+body.touch button,body.touch select{min-height:44px}
+body.touch #side a{padding:14px 14px;font-size:16px}
+body.touch .dots,body.touch .qa,body.touch .lrow .qa{opacity:1}
+body.touch .dots{padding:12px}
+body.touch .rc-row .acts{display:flex}
+body.touch .rc-row .acts button{padding:10px}
+body.touch #pbar{padding:34px 14px 8px}
+body.touch #pseek{height:34px}
+body.touch #pseek .pt{height:6px}
+body.touch #pseek .pknob{transform:scale(1.4)}
+body.touch .prow{min-height:56px}
+body.touch .prow .pc,body.touch #pbar .p-gear,body.touch #p-quick .pq{width:54px;height:54px;border-radius:27px;min-width:54px}
+body.touch .prow .ico{width:28px;height:28px}
+body.touch .pvol input{display:none}
+body.touch #pc-time{font-size:15px;padding:10px 16px}
+body.touch .pc-chap{height:40px!important;font-size:15px}
+body.touch #pc-auto .sw{width:42px;height:18px;border-radius:9px}
+body.touch #pc-auto .kn{width:26px;height:26px;top:-4px}
+body.touch #pc-auto.on .kn{left:20px}
+body.touch .p-menu .pr{padding:15px 16px;font-size:16px}
+body.touch .p-menu{bottom:110px}
+body.touch #tabbar{height:56px}
+body.touch #tabbar .tab{height:42px;width:240px}
+body.touch .pillbtn{padding:12px 16px}
+body.touch .rchip{padding:11px 16px}
+body.touch .rc-row{padding:10px 12px}
+body.touch .tr-row{padding:10px 14px;font-size:15px}

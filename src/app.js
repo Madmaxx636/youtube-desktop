@@ -1,5 +1,6 @@
 const $ = (s) => document.querySelector(s);
 const grid = $('#grid'), status = $('#status'), video = $('#video');
+const perf = { data: false, power: false, battery: null, ready: false };
 let settings = {}, current = null, segments = [], lastSkip = 0, queue = [], view = 'home', speed = 1;
 let editingTools = false, commentSort = 'TOP_COMMENTS';
 let auth = { active: null, accounts: [], encrypted: false }, remoteSubs = null; // remoteSubs: channel ids when signed in
@@ -65,6 +66,7 @@ function applyLayout() {
   applyCommentStyle(); placeComments(); renderPQuick(); syncLogoTitle();
   applyPlayerTheme(); document.body.classList.toggle('no-dim', settings.dimWatched === false);
   paintRc(); renderTabs(); paintBell();
+  applyTouch(); applyPerf();
   applyStableAudio();
   if (settings.notifyInterval !== notifIntervalApplied) { notifIntervalApplied = settings.notifyInterval; scheduleNotifPoll(); }
   document.body.classList.toggle('no-toolbar', settings.showToolbar !== true); // the button row under the video is optional
@@ -379,7 +381,7 @@ async function showVideoDetails(v) {
     $('#d-stats').textContent = parts.join(' • ');
     $('#d-desc').innerHTML = rich(info.description || 'No description.');
     $('#d-tags').innerHTML = (info.keywords || []).slice(0, 12).map((k) => `<span>${esc(k)}</span>`).join('');
-    if (settings.ryd !== false) fetch(`https://returnyoutubedislikeapi.com/votes?videoId=${v.id}`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && ov.isConnected) $('#d-stats').textContent += ` • ${fmtNum(d.dislikes)} dislikes`; }).catch(() => {});
+    if (settings.ryd !== false && !perf.data) fetch(`https://returnyoutubedislikeapi.com/votes?videoId=${v.id}`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && ov.isConnected) $('#d-stats').textContent += ` • ${fmtNum(d.dislikes)} dislikes`; }).catch(() => {});
   } catch { if (ov.isConnected) $('#d-desc').textContent = v.snippet || 'Could not load the full details.'; }
 }
 
@@ -1197,7 +1199,7 @@ function setSpeed(s) {
 }
 async function loadStream(id, quality, keepTime, safe) {
   const t = keepTime ?? 0;
-  const s = await api.stream(id, quality, !!sa.ctx || (settings.stableAudio || 'off') !== 'off', !!safe);
+  const s = await api.stream(id, quality, !!sa.ctx || (settings.stableAudio || 'off') !== 'off', !!safe, { data: perf.data, power: perf.power });
   audio.pause(); audio.removeAttribute('src'); audioActive = false;
   // Streams through the local cache are readable by Web Audio; direct ones are not (and the attribute would stop them loading).
   const local = /^http:\/\/127\.0\.0\.1/.test(s.video || s.audio || '');
@@ -1249,7 +1251,7 @@ function ensureAudioGraph() {
   } catch { sa.ctx = null; return false; }
 }
 function applyStableAudio() {
-  const mode = settings.stableAudio || 'off';
+  const mode = perf.power ? 'off' : settings.stableAudio || 'off'; // the audio graph costs CPU, so power saving skips it
   if (mode === 'off' && !sa.ctx) return;
   if (!ensureAudioGraph()) return;
   const ctx = sa.ctx; if (ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -1310,7 +1312,7 @@ async function openVideo(v, opts = {}) {
     $('#w-subs').textContent = info.subs || '';
     if (info.channelThumb) $('#w-avatar').src = info.channelThumb;
     if (info.likes && !$('#r-likes').textContent) $('#r-likes').textContent = fmtNum(info.likes);
-    daBranding(v.id).then((b) => { const r = daPick(b, v.id); if (settings.dearrow && r?.title && current?.id === v.id) { $('#w-title').title = info.title || v.title; $('#w-title').textContent = r.title; } });
+    daBranding(v.id).then((b) => { const r = daPick(b, v.id); if (settings.dearrow && !perf.data && r?.title && current?.id === v.id) { $('#w-title').title = info.title || v.title; $('#w-title').textContent = r.title; } });
 
     $('#w-stats').textContent = [info.views != null ? fmtNum(info.views) + ' views' : '', info.relative || info.published].filter(Boolean).join(' • ');
     $('#w-desc-text').innerHTML = rich(info.description || '');
@@ -1442,7 +1444,7 @@ function updateCommentNote() {
 async function loadComments(id, more) {
   const list = $('#c-list'), moreBox = $('#c-more');
   if (!more) { cState = { ...cState, id, more: null, hidden: 0, total: cState.id === id ? cState.total : '', shown: 0 }; list.innerHTML = ''; moreBox.innerHTML = ''; }
-  if (!more && settings.commentsAuto === false && !cState.force) {
+  if (!more && (settings.commentsAuto === false || perf.data) && !cState.force) {
     moreBox.innerHTML = '<button id="c-load">Show comments</button>'; $('#c-load').onclick = () => { cState.force = true; loadComments(id); }; return;
   }
   moreBox.innerHTML = '<div class="hint">Loading comments…</div>';
@@ -1571,7 +1573,7 @@ function daPick(b, id) {
   return { title: t ? t.title.replace(/(^|\s)>(?=\S)/g, '$1') : null, thumb: th ? `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${id}&time=${th.timestamp}` : null };
 }
 async function applyDeArrow(root, v) {
-  if (!settings.dearrow || !v.id) return;
+  if (!settings.dearrow || perf.data || !v.id) return;
   const r = daPick(await daBranding(v.id), v.id); if (!r) return;
   const h = root.querySelector('h3'), img = root.querySelector('img');
   if (r.title && h) { h.title = h.textContent; h.textContent = r.title; }
@@ -1591,7 +1593,7 @@ document.addEventListener('error', (e) => {
 
 // ---------- like / dislike (counts from Return YouTube Dislike) ----------
 async function loadVotes(id) {
-  if (settings.ryd === false) return;
+  if (settings.ryd === false || perf.data) return;
   try {
     const r = await fetch(`https://returnyoutubedislikeapi.com/votes?videoId=${id}`); if (!r.ok) return;
     const d = await r.json(); if (current?.id !== id) return;
@@ -2067,30 +2069,39 @@ function paintMarks() {
   if (cuts.length) { const m = `linear-gradient(to right, #000 0, ${cuts.map((p) => `#000 calc(${p}% - 1.5px), transparent calc(${p}% - 1.5px), transparent calc(${p}% + 1.5px), #000 calc(${p}% + 1.5px)`).join(', ')}, #000 100%)`; t.style.webkitMaskImage = m; t.style.maskImage = m; } else { t.style.webkitMaskImage = ''; t.style.maskImage = ''; }
 }
 const hdTag = () => { const h = video.videoHeight || 0; return h >= 2160 ? '4K' : h >= 1440 ? '2K' : h >= 720 ? 'HD' : ''; };
+let autoKey = '';
 function paintAuto() {
-  const b = $('#pc-auto'), m = autoMode(); b.hidden = settings.pbAutoplay === false;
+  const b = $('#pc-auto'), m = autoMode(), key = m + '|' + settings.pbAutoplay; if (key === autoKey) return; autoKey = key; b.hidden = settings.pbAutoplay === false;
   b.classList.toggle('on', m !== 'off'); b.title = `Autoplay: ${AUTO_MODES.find(([k]) => k === m)[1]} (click to turn ${m === 'off' ? 'on' : 'off'}, right-click for more)`;
   b.querySelector('.kn').innerHTML = ic(m === 'off' ? 'pause' : m === 'queue' ? 'list' : 'play');
 }
 $('#pc-auto').onclick = () => { const m = autoMode(); if (m !== 'off') localStorage.setItem('autoLast', m); save({ autoplayMode: m === 'off' ? (localStorage.getItem('autoLast') || 'endless') : 'off' }).then(() => { paintAuto(); renderUpNext(); }); };
 $('#pc-auto').addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); popMenu(menuOf(AUTO_MODES.map(([k, l, d]) => [(autoMode() === k ? '✓ ' : '') + l + ' — ' + d, () => save({ autoplayMode: k }).then(() => { paintAuto(); renderUpNext(); })]))); });
+// The bar repaints a few times a second while playing, so it only touches the page when a value actually changed.
+const pbEls = { play: $('#pc-play'), mute: $('#pc-mute'), vol: $('#pc-vol'), fs: $('#pc-fs'), time: $('#pc-time'), fill: pseek.querySelector('.pplay'), knob: pseek.querySelector('.pknob'), buf: pseek.querySelector('.pbuf') };
+const pbLast = {};
+const setIf = (k, val, fn) => { if (pbLast[k] !== val) { pbLast[k] = val; fn(val); } };
 function paintBar() {
-  const d = vdur(), t = video.currentTime || 0, tm = $('#pc-time');
-  if (!scrubbing) pseek.querySelector('.pplay').style.width = d ? (t / d) * 100 + '%' : '0';
-  pseek.querySelector('.pknob').style.left = d ? (t / d) * 100 + '%' : '0';
+  const d = vdur(), t = video.currentTime || 0, pct = d ? Math.round((t / d) * 10000) / 100 : 0;
+  if (!scrubbing) setIf('fill', pct, (v) => (pbEls.fill.style.width = v + '%'));
+  setIf('knob', pct, (v) => (pbEls.knob.style.left = v + '%'));
   let be = 0; for (let i = 0; i < video.buffered.length; i++) if (video.buffered.start(i) <= t + 0.5) be = Math.max(be, video.buffered.end(i));
-  pseek.querySelector('.pbuf').style.width = d ? Math.min(100, (be / d) * 100) + '%' : '0';
-  tm.textContent = `${fmtDur(t)} / ${fmtDur(d)}`;
-  $('#pc-play').innerHTML = ic(video.paused ? 'play' : 'pause');
+  setIf('buf', d ? Math.min(100, Math.round((be / d) * 1000) / 10) : 0, (v) => (pbEls.buf.style.width = v + '%'));
+  setIf('time', `${fmtDur(t)} / ${fmtDur(d)}`, (v) => (pbEls.time.textContent = v));
+  setIf('play', video.paused, (p) => (pbEls.play.innerHTML = ic(p ? 'play' : 'pause')));
   const vol = video.muted ? 0 : video.volume;
-  $('#pc-mute').innerHTML = ic(vol === 0 ? 'mute' : vol < 0.5 ? 'vollow' : 'vol');
-  $('#pc-vol').value = vol;
-  $('#pc-fs').innerHTML = ic(document.fullscreenElement ? 'fsx' : 'fs');
+  setIf('mute', vol === 0 ? 'mute' : vol < 0.5 ? 'vollow' : 'vol', (n) => (pbEls.mute.innerHTML = ic(n)));
+  setIf('vol', vol, (v) => (pbEls.vol.value = v));
+  setIf('fs', !!document.fullscreenElement, (f) => (pbEls.fs.innerHTML = ic(f ? 'fsx' : 'fs')));
   paintMarks(); paintAuto(); paintChapLabel();
 }
 let scrubbing = false;
 for (const ev of ['loadedmetadata', 'resize']) video.addEventListener(ev, () => renderPQuick());
-for (const ev of ['timeupdate', 'progress', 'durationchange', 'loadedmetadata', 'resize', 'play', 'pause', 'volumechange', 'seeked', 'emptied']) video.addEventListener(ev, paintBar);
+let lastBarPaint = 0;
+for (const ev of ['timeupdate', 'progress', 'durationchange', 'loadedmetadata', 'resize', 'play', 'pause', 'volumechange', 'seeked', 'emptied']) video.addEventListener(ev, (e) => {
+  if (perf.power && (e.type === 'timeupdate' || e.type === 'progress') && Date.now() - lastBarPaint < 900) return; // power saving: about once a second
+  lastBarPaint = Date.now(); paintBar();
+});
 document.addEventListener('fullscreenchange', paintBar);
 $('#pc-play').onclick = () => (video.paused ? video.play().catch(() => {}) : video.pause());
 $('#pc-mute').onclick = () => { video.muted = !video.muted; if (!video.muted && video.volume === 0) video.volume = 0.5; };
@@ -2107,7 +2118,7 @@ const seekFrac = (e) => { const r = pseek.getBoundingClientRect(); return Math.m
 // Hover preview: YouTube's storyboard sheets (a grid of small frames) cut to the frame under the cursor.
 const PREVIEW_W = 200, sbSeen = new Set();
 function previewHtml(time, d) {
-  const sb = current?.storyboard; if (!sb?.url || !sb.count || settings.seekPreview === false) return '';
+  const sb = current?.storyboard; if (!sb?.url || !sb.count || settings.seekPreview === false || perf.data || perf.power) return '';
   const per = sb.cols * sb.rows, idx = Math.min(sb.count - 1, Math.max(0, sb.interval ? Math.floor((time * 1000) / sb.interval) : Math.floor((time / d) * sb.count)));
   const sheet = Math.floor(idx / per), within = idx % per, col = within % sb.cols, row = Math.floor(within / sb.cols), k = PREVIEW_W / sb.w;
   const url = sb.url.replace('$M', sheet);
@@ -2279,7 +2290,8 @@ video.addEventListener('timeupdate', () => {
 function paintChapLabel() {
   const b = $('#pc-chap'); if (!b) return;
   const t = video.currentTime || 0, name = chapters.length ? chapters[chapAt(t)].title : '';
-  b.hidden = !name; if (name && b.dataset.n !== name) { b.dataset.n = name; b.innerHTML = `<span class="cn">${esc(name)}</span>${ic('chevright')}`; }
+  if (b.hidden !== !name) b.hidden = !name;
+  if (name && b.dataset.n !== name) { b.dataset.n = name; b.innerHTML = `<span class="cn">${esc(name)}</span>${ic('chevright')}`; }
 }
 $('#pc-chap').onclick = (e) => { e.stopPropagation(); const m = $('#p-menu'); if (!m.hidden && pmPage === 'chapters') return closeP(); pmPage = 'chapters'; m.hidden = false; $('#p-gear').classList.add('open'); renderPMenu(); };
 
@@ -2305,7 +2317,7 @@ function paintRelated() {
     chips.appendChild(b);
   }
   const f = defs.find(([k]) => k === relChip)[2];
-  renderVideos(relAll.filter(f), rel);
+  renderVideos(perf.data ? relAll.filter(f).slice(0, 12) : relAll.filter(f), rel);
   renderUpNext();
 }
 
@@ -2373,7 +2385,7 @@ wMenu($('#w-bell'), () => {
 // ---------- desktop notifications ----------
 let notifTimer = 0, notifIntervalApplied;
 async function pollUploads() {
-  if (settings.notifyOn === false || settings.notifyUploadsOn === false || settings.notifyUploadMode === 'off') return;
+  if (settings.notifyOn === false || settings.notifyUploadsOn === false || settings.notifyUploadMode === 'off' || perf.data) return;
   const mode = settings.notifyUploadMode || 'bell', b = bells();
   if (mode === 'bell' && !Object.keys(b).length) return;
   try { await fetchSubs(); } catch { return; }
@@ -2388,11 +2400,84 @@ async function pollUploads() {
 }
 function scheduleNotifPoll() {
   clearInterval(notifTimer);
-  const mins = Math.max(5, +settings.notifyInterval || 30);
+  const mins = Math.max(5, +settings.notifyInterval || 30) * (perf.power ? 3 : 1);
   notifTimer = setInterval(pollUploads, mins * 60000);
 }
 setTimeout(() => { pollUploads(); scheduleNotifPoll(); }, 45000);
 api.onOpenVideo((id) => { const v = (lsGet('subcache', { videos: [] }).videos || []).find((x) => x.id === id) || { id, title: '' }; openVideo(v); });
+
+// ---------- data saver, power saving, battery ----------
+// Data saver: smaller pictures, no extras that fetch more (DeArrow, dislike counts, previews, comments until asked), a short buffer.
+// Power saving: no animations or blur, H.264 at a lower size (most devices decode it in hardware), no audio processing, slower timers.
+function applyPerf() {
+  const b = perf.battery, onBat = !!b && !b.charging, auto = settings.powerAuto || 'off';
+  const power = !!settings.powerSaver || (auto === 'battery' && onBat) || (auto === 'low' && onBat && b.level <= 0.2);
+  const data = !!settings.dataSaver, changed = perf.ready && (power !== perf.power || data !== perf.data);
+  perf.power = power; perf.data = data;
+  document.body.classList.toggle('low-power', power); document.body.classList.toggle('data-saver', data);
+  const chip = $('#perf-chip'), label = [data && 'Data saver', power && 'Power saving'].filter(Boolean).join(' + ');
+  chip.hidden = !label; chip.textContent = label; chip.title = 'Click to change (Settings, Performance)';
+  if (changed) { toast(label ? `${label} is on. It applies fully from the next video.` : 'Normal mode'); applyStableAudio(); if (!perf.data) paintRelated(); scheduleNotifPoll(); }
+  perf.ready = true;
+}
+$('#perf-chip').onclick = () => { openSettings(); setTimeout(() => [...document.querySelectorAll('#s-tabs a')].find((a) => a.textContent === 'Performance')?.click(), 60); };
+(async () => { try { perf.battery = await navigator.getBattery(); for (const ev of ['chargingchange', 'levelchange']) perf.battery.addEventListener(ev, applyPerf); applyPerf(); } catch {} })();
+
+// ---------- full titles on hover ----------
+const TITLE_SEL = '.card h3, .vrow h3, .lrow h3, .plrow h3, .subrow h3, .info h3, .ci h3, #related h3, .up-row .t, .es-card .t, .rc-row .ti, #tabbar .tl, #w-title';
+const fullTip = document.createElement('div'); fullTip.id = 'fulltip'; fullTip.hidden = true; document.body.appendChild(fullTip);
+let tipT = 0, tipEl = null;
+const hideFullTip = () => { clearTimeout(tipT); tipEl = null; fullTip.hidden = true; };
+function fullTitleOf(el) {
+  const lead = el.childNodes[0]?.nodeType === 3 ? el.childNodes[0].textContent.trim() : '', shown = (lead || el.textContent).trim();
+  const v = el.closest('.card, .vrow, .lrow, .plrow, .subrow')?._v, orig = v?.title || (el.id === 'w-title' ? current?.title : '');
+  return shown ? shown + (orig && orig !== shown ? `\n\nOriginal title: ${orig}` : '') : '';
+}
+document.addEventListener('mouseover', (e) => {
+  if (touchOn()) return;
+  const el = e.target.closest?.(TITLE_SEL); if (el === tipEl) return;
+  hideFullTip(); if (!el) return;
+  tipEl = el; tipT = setTimeout(() => {
+    const text = fullTitleOf(el); if (!text) return;
+    fullTip.textContent = text; fullTip.hidden = false;
+    const r = el.getBoundingClientRect(), w = fullTip.offsetWidth, h = fullTip.offsetHeight;
+    fullTip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left)) + 'px';
+    fullTip.style.top = (r.bottom + h + 12 < innerHeight ? r.bottom + 6 : Math.max(8, r.top - h - 6)) + 'px';
+  }, 400);
+}, { passive: true });
+document.addEventListener('mouseout', (e) => { if (!e.relatedTarget || !e.relatedTarget.closest?.(TITLE_SEL) || e.relatedTarget.closest(TITLE_SEL) !== tipEl) hideFullTip(); }, { passive: true });
+document.addEventListener('scroll', hideFullTip, true); document.addEventListener('mousedown', hideFullTip, true);
+
+// ---------- touch / tablet mode ----------
+// 'auto' turns on for touch screens without a mouse. Everything gets bigger and nothing needs hovering: tap the picture to show or
+// hide the controls, double-tap the left or right side to jump 10 seconds, and swipe in from the edge to go back or forward.
+const touchOn = () => document.body.classList.contains('touch');
+function applyTouch() {
+  const m = settings.touchMode || 'auto';
+  const on = m === 'on' || (m === 'auto' && matchMedia('(pointer: coarse) and (hover: none)').matches);
+  document.body.classList.toggle('touch', on);
+  $('#p-bigplay').innerHTML = ic(video.paused ? 'play' : 'pause');
+  if (on) hideFullTip();
+}
+matchMedia('(pointer: coarse)').addEventListener?.('change', applyTouch);
+let lastTap = { t: 0, x: 0 }, tapTimer = 0, touchSeen = false;
+const flashSkip = (side, secs) => { const el = $('#p-skip'); el.className = side; el.innerHTML = `${ic(side === 'l' ? 'rewind' : 'forward')}<span>${secs} s</span>`; el.hidden = false; clearTimeout(el._t); el._t = setTimeout(() => (el.hidden = true), 600); };
+function touchSeek(dx) { const side = dx < 0.4 ? 'l' : dx > 0.6 ? 'r' : null; if (!side) return false; const secs = 10; video.currentTime = Math.max(0, Math.min(vdur() || 1e9, video.currentTime + (side === 'l' ? -secs : secs))); flashSkip(side, secs); return true; }
+video.addEventListener('pointerup', (e) => {
+  if (e.pointerType !== 'touch' || !touchOn()) return; touchSeen = true;
+  const r = video.getBoundingClientRect(), dx = (e.clientX - r.left) / r.width, now = Date.now();
+  if (now - lastTap.t < 320 && Math.abs(e.clientX - lastTap.x) < 80) { clearTimeout(tapTimer); lastTap = { t: 0, x: 0 }; if (!touchSeek(dx)) toggleFs(); return; }
+  lastTap = { t: now, x: e.clientX };
+  tapTimer = setTimeout(() => { pbox.classList.toggle('ctl-hide'); if (!pbox.classList.contains('ctl-hide')) showBar(); }, 330); // a single tap shows or hides the controls
+});
+// the browser's click after a touch must not also toggle play (the tap above already did what it should)
+video.addEventListener('click', (e) => { if (touchOn() && touchSeen) { e.stopImmediatePropagation(); touchSeen = false; } }, true);
+$('#p-bigplay').onclick = () => (video.paused ? video.play().catch(() => {}) : video.pause());
+for (const ev of ['play', 'pause', 'emptied']) video.addEventListener(ev, () => { $('#p-bigplay').innerHTML = ic(video.paused ? 'play' : 'pause'); });
+// swipe in from the left or right edge: back or forward
+let edge = null;
+document.addEventListener('touchstart', (e) => { const t = e.touches[0]; edge = touchOn() && e.touches.length === 1 && (t.clientX < 24 || t.clientX > innerWidth - 24) ? { x: t.clientX, y: t.clientY, left: t.clientX < 24 } : null; }, { passive: true });
+document.addEventListener('touchend', (e) => { if (!edge) return; const t = e.changedTouches[0], dx = t.clientX - edge.x, dy = Math.abs(t.clientY - edge.y); if (dy < 60 && ((edge.left && dx > 90) || (!edge.left && dx < -90))) navGo(edge.left ? -1 : 1); edge = null; }, { passive: true });
 
 let volT;
 video.addEventListener('volumechange', () => {

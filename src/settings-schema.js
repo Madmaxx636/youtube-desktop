@@ -11,7 +11,7 @@ const SCHEMA = {
   defaults: {
     startPage: 'home', logoGoes: 'home', chaptersPlace: 'side', sidePanel: true, relatedChips: true, tabsBar: true, classicMode: 'auto', notifyOn: true, notifyWhen: 'background', notifySound: true, notifyUploadsOn: true, notifyUploadMode: 'bell', notifyInterval: 30, notifySleep: true, notifyQueue: true, notifyUpdate: true, notifyPlaying: false, autoUpdateCheck: true, playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, seekPreview: true, stableAudio: 'levels', stableBoost: true, stableCompress: 'strong', dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
     commentsPlace: 'below', commentsSideHeight: 75, commentsAuto: true, commentsSortDefault: 'TOP_COMMENTS', commentsSize: 100, commentsDensity: 'comfortable', commentsLines: '5', commentsAvatars: true, commentsLikes: true, commentsBadges: true, commentsActions: true, commentsBlock: '', commentsHideLinks: false, composerStyle: 'expand', composerSubmit: 'ctrl', composerConfirm: true, composerDrafts: true, composerCounter: true, afterPost: 'newest',
-    autoplayMode: 'endless', watchedAt: '50', syncHistory: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
+    autoplayMode: 'endless', dataSaver: false, powerSaver: false, powerAuto: 'off', dataSaverRes: '480', powerRes: '720', touchMode: 'auto', watchedAt: '50', syncHistory: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
     quality: 'auto', maxBitrate: true, fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
     dlContainer: 'mp4', dlMaxHeight: '1080', dlCodec: 'auto', dlFps: '0', dlAudioFormat: 'mp3', dlAudioQuality: '0',
     dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
@@ -246,6 +246,20 @@ const SCHEMA = {
         { key: 'composerDrafts', type: 'toggle', label: 'Keep a draft for each video until I post it' },
         { key: 'composerCounter', type: 'toggle', label: 'Show a character counter' },
         { key: 'afterPost', type: 'select', label: 'After I post', options: opt(['newest', 'Show newest comments so I can see mine'], ['keep', 'Keep the current sorting']) },
+      ] },
+    ] },
+    { id: 'performance', label: 'Performance', groups: [
+      { title: 'Saving modes', items: [
+        { key: 'dataSaver', type: 'toggle', label: 'Data saver', hint: 'Smaller video, a short buffer, and no extras that fetch more: DeArrow, dislike counts, seek-bar previews, new-video checks, and comments until you ask for them.' },
+        { key: 'powerSaver', type: 'toggle', label: 'Power saving (low-end mode)', hint: 'For tablets and older devices: no animations or blur, H.264 video at a lower size (most devices decode it in hardware), no audio processing, slower timers and a smaller memory buffer.' },
+        { key: 'powerAuto', type: 'select', label: 'Turn power saving on by itself', options: opt(['off', 'Never'], ['battery', 'Whenever the device runs on battery'], ['low', 'When on battery and 20% or less is left']) },
+      ] },
+      { title: 'Limits while a mode is on', items: [
+        { key: 'dataSaverRes', type: 'select', label: 'Data saver picture size', options: opt(['240', '240p'], ['360', '360p'], ['480', '480p'], ['720', '720p']), when: (s) => s.dataSaver },
+        { key: 'powerRes', type: 'select', label: 'Power saving picture size', options: opt(['360', '360p'], ['480', '480p'], ['720', '720p'], ['1080', '1080p']), when: (s) => s.powerSaver || s.powerAuto !== 'off' },
+      ] },
+      { title: 'Touch screens', items: [
+        { key: 'touchMode', type: 'select', label: 'Touch mode', options: opt(['auto', 'Automatic (on for touch screens without a mouse)'], ['on', 'Always on'], ['off', 'Always off']), hint: 'Bigger buttons, nothing that needs hovering, double-tap the left or right of the video to jump 10 seconds, tap to show or hide the controls, and swipe in from the screen edge to go back or forward.' },
       ] },
     ] },
     { id: 'notifications', label: 'Notifications', groups: [
