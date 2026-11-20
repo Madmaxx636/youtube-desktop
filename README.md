@@ -23,7 +23,7 @@ Requires `yt-dlp` and `ffmpeg`. Keep yt-dlp current: YouTube breaks old builds. 
 ## Features
 
 - Search with filters and suggestions, channel pages, comments (read and post), related videos; paste any YouTube link into the search box
-- Touch mode for tablets, data saver and power saving modes, full-title tooltips, playback up to 4K at the highest bitrate YouTube offers, with stable audio (loudness levelling) and a hover preview on the seek bar, plus settings for resolution, frame rate, codec (H.264, VP9, AV1) and video/audio bitrate; audio-only mode; speed 0.25x to 3x
+- A floating player that keeps the video going in a corner while you browse, a notification bell, a buffer of up to 30 minutes kept on disk, videos looked up before you open them, touch mode for tablets, data saver and power saving modes, full-title tooltips, playback up to 4K at the highest bitrate YouTube offers, with stable audio (loudness levelling) and a hover preview on the seek bar, plus settings for resolution, frame rate, codec (H.264, VP9, AV1) and video/audio bitrate; audio-only mode; speed 0.25x to 3x
 - Subtitles from yt-dlp with their own appearance settings (size, font, colors, edge, background)
 - Downloads (video or audio) through yt-dlp: container, resolution, codec, MP3/M4A/Opus/FLAC/WAV, bitrate, embedded cover art, metadata and subtitles, sponsor-segment removal, file-name template, speed limit; whole playlists with progress and cancel
 - Subscriptions in two layouts: grouped by day or channel (2016-2018 style) or a box with a channel list (2012 style); manage and import subscriptions

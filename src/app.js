@@ -66,7 +66,7 @@ function applyLayout() {
   applyCommentStyle(); placeComments(); renderPQuick(); syncLogoTitle();
   applyPlayerTheme(); document.body.classList.toggle('no-dim', settings.dimWatched === false);
   paintRc(); renderTabs(); paintBell();
-  applyTouch(); applyPerf();
+  applyTouch(); applyPerf(); updateAway(); paintBellBadge();
   applyStableAudio();
   if (settings.notifyInterval !== notifIntervalApplied) { notifIntervalApplied = settings.notifyInterval; scheduleNotifPoll(); }
   document.body.classList.toggle('no-toolbar', settings.showToolbar !== true); // the button row under the video is optional
@@ -269,6 +269,7 @@ document.addEventListener('wheel', (e) => {
 function pageAnim(delta) {
   const all = ['pa-back', 'pa-fwd', 'pa-fade'], m = settings.pageAnim || 'slide';
   for (const el of [$('#main'), $('#watch')]) {
+    if (el.classList.contains('away')) continue; // a transform here would drag the floating player along
     el.classList.remove(...all); clearTimeout(el._paT);
     if (m === 'none') continue;
     void el.offsetWidth;
@@ -281,7 +282,7 @@ async function navGo(delta) {
   const cur = navStack[navIdx]; if (cur) cur.scroll = scroller().scrollTop;
   navIdx = i; navBusy = true; updateNavButtons();
   const e = navStack[i];
-  try { if (e.type !== 'video' && !$('#watch').hidden) video.pause(); const run = runNav(e); pageAnim(delta); await run; } catch {}
+  try { if (e.type !== 'video' && !$('#watch').hidden && !floatOn()) video.pause(); const run = runNav(e); pageAnim(delta); await run; } catch {}
   navBusy = false;
   setTimeout(() => { scroller().scrollTop = e.scroll || 0; }, 80);
 }
@@ -391,7 +392,7 @@ function card(v, opts = {}) {
   const prog = progOf(v);
   const el = document.createElement('div');
   el.className = 'card' + (isWatched(v.id) && opts.dim ? ' watched' : '');
-  el.innerHTML = `<div class="th${prog > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${prog > 1 ? `<div class="bar" style="width:${Math.min(100, prog)}%"></div>` : ''}${isWatched(v.id) && opts.dim ? '<span class="wbadge">Watched</span>' : ''}</div>
+  el.innerHTML = `<div class="th${prog > 1 ? ' hasbar' : ''}"><img loading="lazy" decoding="async" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${prog > 1 ? `<div class="bar" style="width:${Math.min(100, prog)}%"></div>` : ''}${isWatched(v.id) && opts.dim ? '<span class="wbadge">Watched</span>' : ''}</div>
     <div class="ci"><h3>${esc(v.title)}</h3><div class="meta">${v.channelId ? `<a data-ch="${esc(v.channelId)}">${esc(v.channel)}</a>` : esc(v.channel)}<br>${esc([v.views, v.published].filter(Boolean).join(' • '))}</div></div>`;
   if (opts.actions) {
     const w = isWatched(v.id), qa = document.createElement('div'); qa.className = 'qa';
@@ -415,6 +416,7 @@ function card(v, opts = {}) {
   return el;
 }
 function renderVideos(list, target = grid, opts = {}) {
+  if (target === grid && list.length && !performance.getEntriesByName('first-cards').length) performance.mark('first-cards'); // (start-up timing)
   if (settings.hideShorts) list = list.filter((v) => !v.isShort);
   const seen = new Set();
   for (const v of list) { if (seen.has(v.id)) continue; seen.add(v.id); target.appendChild(card(v, { queue: list, ...opts })); }
@@ -432,15 +434,30 @@ async function syncProgress() {
   if (!signedIn()) { ytProg = {}; lsSet('ytprogress', {}); return; }
   try { const m = {}; for (const x of await api.meProgress()) m[x.id] = x.pct; ytProg = m; lsSet('ytprogress', m); applyBars(); } catch {}
 }
-function showMain() { hideEndScreen(); grid.classList.remove('listmode'); applyBars(); $('#chan').hidden = true; $('#watch').hidden = true; $('#main').hidden = false; $('#subbox').hidden = true; $('#filters').hidden = true; grid.hidden = false; syncSideAuto(); }
+function showMain() { hideEndScreen(); grid.classList.remove('listmode'); applyBars(); $('#chan').hidden = true; $('#watch').hidden = true; $('#main').hidden = false; $('#subbox').hidden = true; $('#filters').hidden = true; grid.hidden = false; syncSideAuto(); updateAway(); }
 async function guarded(label, fn) { setStatus(`Loading ${label}…`); try { await fn(); setStatus(''); } catch (e) { setStatus('Error: ' + e.message); } }
 
 // ---------- views ----------
 async function goHome() { navPush('home', {}); view = 'home'; document.querySelectorAll('#side a').forEach((x) => x.classList.toggle('active', x.dataset.nav === 'home')); showMain(); grid.innerHTML = ''; await guarded('home', async () => {
   // Seed the feed from recently watched channels when we have history.
   const seeds = [...new Set(lsGet('history', []).slice(0, 6).map((v) => v.channel).filter(Boolean))];
-  renderVideos(await api.home(seeds));
+  // Show what was there last time at once, then swap in the fresh list when it arrives (only if it is different, so the page does not jump).
+  const old = lsGet('homeCache', null), oldIds = (old?.videos || []).map((v) => v.id).join();
+  if (old?.videos?.length) { renderVideos(old.videos); setStatus('Refreshing…'); }
+  const fresh = await api.home(seeds);
+  if (view !== 'home') return;
+  if (fresh.map((v) => v.id).join() !== oldIds) { grid.innerHTML = ''; renderVideos(fresh); }
+  lsSet('homeCache', { videos: fresh.slice(0, 40) });
 }); }
+// Results of searches, playlists and channel headers are remembered for a few minutes, so going back to one is instant.
+const memoStore = new Map();
+async function memoCall(key, fn, ttl = 5 * 60 * 1000) {
+  const hit = memoStore.get(key);
+  if (hit && Date.now() - hit.at < ttl) return structuredClone(hit.v);
+  const v = await fn(); memoStore.set(key, { v: structuredClone(v), at: Date.now() });
+  if (memoStore.size > 60) memoStore.delete(memoStore.keys().next().value);
+  return v;
+}
 let searchFilters = {}, lastQuery = '';
 const FILTERS = [
   ['type', 'Type', [['', 'Any'], ['video', 'Video'], ['playlist', 'Playlist'], ['channel', 'Channel']]],
@@ -472,15 +489,15 @@ async function doSearch(q, keepFilters) {
   const link = parseYtLink(q.trim()); if (link) { $('#suggest').hidden = true; return link(); }
   if (!keepFilters) searchFilters = {};
   lastQuery = q; navPush('search', { q, filters: { ...searchFilters } }); pushSearchHistory(q); view = 'search'; showMain(); grid.innerHTML = ''; $('#suggest').hidden = true; renderFilters();
-  await guarded('results', async () => { lastResults = await api.search(q, searchFilters); renderSearchResults(); });
+  await guarded('results', async () => { lastResults = await memoCall('s:' + q + JSON.stringify(searchFilters), () => api.search(q, searchFilters)); renderSearchResults(); });
 }
 // A video as a row with its details (search results, history): channel, views, date, description snippet, badges.
 function videoRow(v, queueList) {
   const el = document.createElement('div'); el.className = 'vrow' + (isWatched(v.id) && view === 'subs' ? ' watched' : ''); el._v = v;
   const pr = progOf(v);
-  el.innerHTML = `<div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}</div>
+  el.innerHTML = `<div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" decoding="async" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}</div>
     <div class="info"><h3>${esc(v.title)}</h3><div class="meta">${esc([v.views, v.published].filter(Boolean).join(' • '))}</div>
-    <div class="chan">${v.channelThumb ? `<img loading="lazy" src="${esc(v.channelThumb)}">` : ''}${v.channelId ? `<a class="linkish" data-ch="${esc(v.channelId)}">${esc(v.channel)}</a>` : `<span>${esc(v.channel)}</span>`}${v.verified ? `<span class="vf" title="Verified">${ic('check')}</span>` : ''}</div>
+    <div class="chan">${v.channelThumb ? `<img loading="lazy" decoding="async" src="${esc(v.channelThumb)}">` : ''}${v.channelId ? `<a class="linkish" data-ch="${esc(v.channelId)}">${esc(v.channel)}</a>` : `<span>${esc(v.channel)}</span>`}${v.verified ? `<span class="vf" title="Verified">${ic('check')}</span>` : ''}</div>
     ${v.snippet ? `<div class="snip">${esc(v.snippet)}</div>` : ''}${(v.badges || []).length ? `<div class="badges">${v.badges.map((b) => `<span>${esc(b)}</span>`).join('')}</div>` : ''}</div>`;
   el.onclick = (e) => { const c = e.target.closest('[data-ch]'); if (c) { e.stopPropagation(); return openChannel(c.dataset.ch); } queue = queueList; openVideo(v); };
   addDots(el, v);
@@ -489,7 +506,7 @@ function videoRow(v, queueList) {
 }
 function playlistListRow(p) {
   const el = document.createElement('div'); el.className = 'vrow'; el._pl = p;
-  el.innerHTML = `<div class="th"><img loading="lazy" src="${esc(p.thumb)}">${p.count ? `<span class="dur">${esc(p.count)}</span>` : ''}</div><div class="info"><h3>${esc(p.title)}</h3><div class="meta">${esc(p.meta || 'Playlist')}</div></div>`;
+  el.innerHTML = `<div class="th"><img loading="lazy" decoding="async" src="${esc(p.thumb)}">${p.count ? `<span class="dur">${esc(p.count)}</span>` : ''}</div><div class="info"><h3>${esc(p.title)}</h3><div class="meta">${esc(p.meta || 'Playlist')}</div></div>`;
   el.onclick = () => openPlaylist(p.id);
   return el;
 }
@@ -515,7 +532,7 @@ function renderSearchResults() {
 }
 function playlistCard(p) {
   const el = document.createElement('div'); el.className = 'card';
-  el.innerHTML = `<div class="th"><img loading="lazy" src="${esc(p.thumb)}">${p.count ? `<span class="dur">${esc(p.count)}</span>` : ''}</div><div class="ci"><h3>${esc(p.title)}</h3><div class="meta">${esc(p.meta || 'Playlist')}</div></div>`;
+  el.innerHTML = `<div class="th"><img loading="lazy" decoding="async" src="${esc(p.thumb)}">${p.count ? `<span class="dur">${esc(p.count)}</span>` : ''}</div><div class="ci"><h3>${esc(p.title)}</h3><div class="meta">${esc(p.meta || 'Playlist')}</div></div>`;
   el.onclick = () => openPlaylist(p.id);
   el._pl = p;
   return el;
@@ -607,7 +624,7 @@ function listRow(v, opts = {}) {
   const pr = progOf(v), views = String(v.views || '').replace(/\s*views?$/i, '');
   const chan = `${v.channelId ? `<a data-ch="${esc(v.channelId)}">${esc(v.channel)}</a>` : `<span>${esc(v.channel)}</span>`}${v.verified ? `<span class="vf" title="Verified">${ic('check')}</span>` : ''}`;
   const vw = views ? `<span class="vw">${ic('tri')}${esc(views)}</span>` : '';
-  el.innerHTML = `<div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}
+  el.innerHTML = `<div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" decoding="async" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}
       <div class="qa"><button data-q="later" title="Watch later">${ic('clock')}</button><button data-q="queue" title="Add to queue">${ic('listplus')}</button></div></div>
     <div class="info"><h3>${esc(v.title)}</h3>${opts.big ? `<div class="l2">${chan}${vw}</div>` : `<div class="l2">${chan}</div><div class="l3">${views ? `<span class="vw" style="margin-left:0">${ic('tri')}${esc(views)}</span>` : ''}${v.published ? `<span>${esc(v.published)}</span>` : ''}</div>`}</div>`;
   el.querySelector('.qa').onclick = (e) => {
@@ -668,7 +685,7 @@ function renderPlaylistPage(pl, opt = {}) {
 async function openPlaylist(id) {
   navPush('playlist', { id }); view = 'playlist'; showMain(); grid.hidden = true;
   const box = $('#chan'); box.hidden = false; box.innerHTML = '<div class="hint" style="padding:24px">Loading playlist…</div>'; setStatus('');
-  try { renderPlaylistPage(await api.playlist(id)); }
+  try { renderPlaylistPage(await memoCall('p:' + id, () => api.playlist(id), 60 * 1000)); }
   catch (e) { box.hidden = true; grid.hidden = false; setStatus('Could not open this playlist: ' + e.message); }
 }
 
@@ -676,7 +693,7 @@ async function openPlaylist(id) {
 let chanState = null;
 function channelCard(c) {
   const el = document.createElement('div'); el.className = 'card chcard';
-  el.innerHTML = `<div class="av">${c.avatar ? `<img loading="lazy" src="${esc(c.avatar)}">` : ''}</div><h3>${esc(c.name)}</h3><div class="meta">${esc([c.handle, c.subs].filter(Boolean).join(' • '))}</div>`;
+  el.innerHTML = `<div class="av">${c.avatar ? `<img loading="lazy" decoding="async" src="${esc(c.avatar)}">` : ''}</div><h3>${esc(c.name)}</h3><div class="meta">${esc([c.handle, c.subs].filter(Boolean).join(' • '))}</div>`;
   el.onclick = () => openChannel(c.id);
   return el;
 }
@@ -684,7 +701,7 @@ async function openChannel(id, tab = 'Home', sort) {
   view = 'channel'; showMain(); grid.hidden = true;
   const box = $('#chan'); box.hidden = false; box.innerHTML = '<div class="hint" style="padding:24px">Loading channel…</div>'; setStatus('');
   let info;
-  try { info = await api.channelInfo(id); }
+  try { info = await memoCall('c:' + id, () => api.channelInfo(id)); }
   catch (e) { box.hidden = true; grid.hidden = false; return setStatus('Could not open this channel: ' + e.message); }
   chanState = { id, info, tab: null, sort: 'Latest', req: 0, io: null };
   const subbed = isSub(id);
@@ -907,7 +924,7 @@ function subRow(v, queueList) {
   const w = isWatched(v.id);
   el.className = 'subrow' + (w ? ' watched' : '');
   const pr = progOf(v);
-  el.innerHTML = `<div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}</div>
+  el.innerHTML = `<div class="th${pr > 1 ? ' hasbar' : ''}"><img loading="lazy" decoding="async" src="${esc(v.thumb)}">${v.duration ? `<span class="dur">${esc(v.duration)}</span>` : ''}${pr > 1 ? `<div class="bar" style="width:${Math.min(100, pr)}%"></div>` : ''}</div>
     <div class="info"><h3>${esc(v.title)}</h3><div class="meta"><a class="linkish" data-ch="${esc(v.channelId)}">${esc(v.channel)}</a> • ${esc([v.views, v.published].filter(Boolean).join(' • '))}</div>
     <div class="acts"><button data-a="watch">${w ? 'Mark unwatched' : 'Mark watched'}</button><button data-a="later">Watch later</button></div></div>`;
   const play = () => { queue = queueList; openVideo(v); };
@@ -1098,7 +1115,7 @@ const TOOLS = {
   mute: { icon: 'mute', label: 'Mute', on: () => video.muted, run: () => { video.muted = !video.muted; } },
   audioonly: { icon: 'headphones', label: 'Audio only', on: () => settings.quality === 'audio', run: () => TOOLS.quality.change(settings.quality === 'audio' ? 'auto' : 'audio') },
   sleep: { icon: 'moon', label: 'Sleep timer', on: () => !!sleepEnd || sleepEnding, badge: () => (sleepEnd ? Math.ceil((sleepEnd - Date.now()) / 60000) + 'm' : sleepEnding ? 'end' : ''), run: () => showMenu(SLEEP_OPTS.map(([v, l]) => ({ label: l, icon: 'moon', fn: () => setSleep(v) }))) },
-  close: { icon: 'x', label: 'Close player (Esc)', run: () => { video.pause(); showMain(); } },
+  close: { icon: 'x', label: 'Close player (Esc)', run: () => { if (!floatOn()) video.pause(); showMain(); } }, // with the floating player on, this minimizes it
 };
 const toolIds = () => (settings.toolbar || DEFAULT_TOOLBAR).filter((id) => TOOLS[id]);
 function makeTool(id) {
@@ -1197,42 +1214,62 @@ function setSpeed(s) {
   if (settings.rememberSpeed) save({ speed });
   else renderToolbar();
 }
-async function loadStream(id, quality, keepTime, safe) {
-  const t = keepTime ?? 0;
+// Video and audio arrive as separate streams, so a hidden <audio> element follows the video. The video is the clock: the sound starts
+// once the picture is really moving, small drifts are corrected by nudging the speed a little, and only a big gap is a jump.
+const audio = new Audio();
+audio.preload = 'auto'; audio.crossOrigin = 'anonymous';
+let audioActive = false, audioGo = false, audioArm = null, loadSeq = 0, lastHardSeek = 0;
+function syncAudio(hard) {
+  if (!audioActive) return;
+  audio.volume = video.volume; audio.muted = video.muted;
+  const base = video.playbackRate || 1;
+  if (!audioGo) { audio.playbackRate = base; return; }
+  if (audio.seeking || audio.readyState < 3) return; // still loading: seeking it again would only restart its download
+  const d = audio.currentTime - video.currentTime;
+  if (hard || Math.abs(d) > 0.6) { if (hard || Date.now() - lastHardSeek > 2000) { lastHardSeek = Date.now(); audio.currentTime = video.currentTime; } audio.playbackRate = base; return; }
+  audio.playbackRate = Math.abs(d) > 0.04 ? base * (1 - Math.max(-0.05, Math.min(0.05, d * 0.5))) : base;
+}
+const stopAudioClock = () => { audioGo = false; audioArm = null; if (audioActive) audio.pause(); };
+const armAudio = () => { if (audioActive && !video.paused) { audioGo = false; audioArm = { t: video.currentTime }; } };
+video.addEventListener('playing', armAudio);
+video.addEventListener('timeupdate', () => {
+  if (audioArm && !video.paused && !video.seeking && video.currentTime > audioArm.t + 0.01) {
+    audioArm = null; audioGo = true; audio.currentTime = video.currentTime; syncAudio(false); audio.play().catch(() => {});
+  }
+});
+for (const ev of ['pause', 'waiting', 'seeking', 'ended', 'emptied']) video.addEventListener(ev, stopAudioClock);
+video.addEventListener('seeked', () => { if (!video.paused) armAudio(); else if (audioActive) audio.currentTime = video.currentTime; });
+video.addEventListener('ratechange', () => syncAudio(false));
+video.addEventListener('volumechange', () => syncAudio(false));
+setInterval(() => { if (audioActive && audioGo && !video.paused && !video.seeking) syncAudio(false); }, 500);
+
+// Empties the player (picture and sound) so the next video starts from a clean state and the old buffers are freed.
+function resetMedia() {
+  stopAudioClock();
+  video.pause(); video.removeAttribute('src'); video.load();
+  audio.removeAttribute('src'); audio.load(); audioActive = false;
+}
+const mediaReady = (el) => (el.readyState >= 3 ? Promise.resolve() : new Promise((r) => el.addEventListener('canplay', r, { once: true })));
+// Opens the stream for the current video. Playback starts once picture and sound are both ready (or after a few seconds regardless),
+// at the right position from the start, so there is no black flash and no replay of the first seconds.
+async function loadStream(id, quality, startAt, safe) {
+  const my = ++loadSeq;
   const s = await api.stream(id, quality, !!sa.ctx || (settings.stableAudio || 'off') !== 'off', !!safe, { data: perf.data, power: perf.power });
-  audio.pause(); audio.removeAttribute('src'); audioActive = false;
+  if (my !== loadSeq || !current || current.id !== id) return; // another video was opened while this one was being looked up
+  resetMedia();
   // Streams through the local cache are readable by Web Audio; direct ones are not (and the attribute would stop them loading).
   const local = /^http:\/\/127\.0\.0\.1/.test(s.video || s.audio || '');
   if (local) { video.crossOrigin = 'anonymous'; audio.crossOrigin = 'anonymous'; } else { video.removeAttribute('crossorigin'); audio.removeAttribute('crossorigin'); }
   video.src = s.video || s.audio;
   if (s.video && s.audio) { audio.src = s.audio; audioActive = true; }
+  const t = startAt || 0;
+  if (t > 0.5) { try { video.currentTime = t; if (audioActive) audio.currentTime = t; } catch {} }
+  video.playbackRate = speed;
   applyStableAudio();
-  video.addEventListener('loadedmetadata', () => {
-    if (t) video.currentTime = t;
-    video.playbackRate = speed;
-    syncAudio(true);
-    video.play().catch(() => {});
-  }, { once: true });
+  await Promise.race([Promise.all([mediaReady(video), audioActive ? mediaReady(audio) : null]), new Promise((r) => setTimeout(r, 6000))]);
+  if (my !== loadSeq) return;
+  video.play().catch(() => {});
 }
-
-// Video and audio arrive as separate streams, so a hidden <audio> element follows the video.
-const audio = new Audio();
-audio.preload = 'auto'; audio.crossOrigin = 'anonymous';
-let audioActive = false;
-function syncAudio(hard) {
-  if (!audioActive) return;
-  audio.playbackRate = video.playbackRate;
-  audio.volume = video.volume; audio.muted = video.muted;
-  if (hard || Math.abs(audio.currentTime - video.currentTime) > 0.25) audio.currentTime = video.currentTime;
-}
-video.addEventListener('play', () => { syncAudio(true); if (audioActive) audio.play().catch(() => {}); });
-video.addEventListener('pause', () => audioActive && audio.pause());
-video.addEventListener('waiting', () => audioActive && audio.pause());
-video.addEventListener('playing', () => { syncAudio(true); if (audioActive) audio.play().catch(() => {}); });
-video.addEventListener('seeked', () => syncAudio(true));
-video.addEventListener('ratechange', () => syncAudio(false));
-video.addEventListener('volumechange', () => syncAudio(false));
-setInterval(() => { if (audioActive && !video.paused) syncAudio(false); }, 1000);
 // ---------- stable audio: even out the loudness ----------
 // 'levels' trims loud videos (and, if allowed, lifts quiet ones) to a common loudness using the level YouTube reports for the video.
 // 'compress' also squeezes the loud and quiet parts of one video closer together (good for late-night listening).
@@ -1278,13 +1315,24 @@ function updateChannelRow() {
 }
 $('#w-sub').onclick = async () => { await TOOLS.subscribe.run(); updateChannelRow(); renderToolbar(); };
 
+// Shows the watch page again for the video that is already in the player (no reload).
+function showWatchPage() {
+  $('#main').hidden = true; $('#watch').hidden = false; $('#watch').classList.remove('away'); syncSideAuto(); renderTabs();
+}
 async function openVideo(v, opts = {}) {
-  navPush('video', { v }, { replace: !!opts.replace });
-  histTime(); histSent = null; // report where you left the previous video
+  // The video is already in the player (coming back from the floating player, or back in the history): just show it again.
+  if (current && current.id === v.id && video.currentSrc && !video.error && !video.ended) {
+    if (!opts.stay) { navPush('video', { v }, { replace: !!opts.replace }); showWatchPage(); }
+    return;
+  }
+  if (!opts.stay) navPush('video', { v }, { replace: !!opts.replace });
+  saveProgress(); histTime(); histSent = null; // keep where you left the previous video, and report it
+  ++loadSeq; resetMedia(); video.poster = v.thumb || ''; pbox.classList.add('loading'); // stop the old one at once; the picture shows while the new one is found
   if (opts.list !== undefined) playlistCtx = opts.list; else if (!opts.keep) playlistCtx = null;
   hideEndScreen(); relatedVids = []; relAll = []; $('#rc-chips').innerHTML = ''; setChapters([]);
   current = v; segments = []; streamRetries = 0;
-  $('#main').hidden = true; $('#watch').hidden = false; $('#watch').scrollTop = 0; syncSideAuto();
+  if (opts.stay) updateAway();
+  if (!opts.stay) { $('#main').hidden = true; $('#watch').hidden = false; $('#watch').scrollTop = 0; $('#watch').classList.remove('away'); syncSideAuto(); }
   renderTabs(); if (!document.hasFocus() || document.hidden) api.notify('playing', 'Now playing', v.title || '', v.id).catch(() => {});
   $('#w-title').textContent = v.title;
   $('#w-ch').textContent = v.channel || ''; $('#w-subs').textContent = ''; $('#r-likes').textContent = ''; $('#r-dislikes').textContent = ''; updateRateButtons(); $('#w-avatar').removeAttribute('src');
@@ -1296,16 +1344,15 @@ async function openVideo(v, opts = {}) {
   if (!settings.pauseHistory) pushList('history', v); // marked watched later, once you have really watched most of it (see saveProgress)
   capTracks = []; capLang = ''; setCaptionTrack(null); paintRc();
   updateChannelRow(); renderToolbar();
+  // The stream (yt-dlp) and the details (youtubei) are looked up at the same time, and the details are shown as soon as they arrive.
+  const prog = lsGet('progress', {})[v.id], startAt = settings.resume && prog && prog.pct < 95 ? prog.t : 0;
+  const infoP = api.video(v.id).catch(() => null);
+  loadStream(v.id, settings.quality || 'auto', startAt).catch((e) => { if (current?.id === v.id) { pbox.classList.remove('loading'); $('#w-stats').textContent = 'Could not load stream: ' + e.message; } });
+  navigator.mediaSession && (navigator.mediaSession.metadata = new MediaMetadata({ title: v.title, artist: v.channel, artwork: v.thumb ? [{ src: v.thumb }] : [] }));
+  loadSegments(v.id); loadVotes(v.id);
   try {
-    await loadStream(v.id, settings.quality || 'auto');
-    const prog = lsGet('progress', {})[v.id];
-    if (settings.resume && prog && prog.pct < 95) video.addEventListener('loadedmetadata', () => (video.currentTime = prog.t), { once: true });
-  } catch (e) { $('#w-stats').textContent = 'Could not load stream: ' + e.message; }
-  navigator.mediaSession && (navigator.mediaSession.metadata = new MediaMetadata({ title: v.title, artist: v.channel, artwork: [{ src: v.thumb }] }));
-  loadSegments(v.id); loadVotes(v.id); loadCaptionList(v.id);
-  try {
-    const info = await api.video(v.id);
-    if (!current || current.id !== v.id) return;
+    const info = await infoP;
+    if (!info || !current || current.id !== v.id) return;
     current = { ...v, ...info, channelId: info.channelId || v.channelId, channelThumb: info.channelThumb };
     $('#w-title').textContent = info.title || v.title;
     $('#w-ch').textContent = info.channel || v.channel; $('#w-ch').onclick = () => info.channelId && openChannel(info.channelId);
@@ -1322,6 +1369,7 @@ async function openVideo(v, opts = {}) {
     setChapters(info.chapters?.length ? info.chapters : parseChapters(info.description));
     relatedVids = info.related.filter((x) => !x.isShort);
     loadComments(v.id);
+    if (info.captionTracks) setCaptionTracks(info.captionTracks); else loadCaptionList(v.id);
   } catch {}
 }
 $('#desc-toggle').onclick = () => {
@@ -1549,6 +1597,7 @@ api.onDownload((p) => {
     lsSet('downloads', list);
     const row = [...document.querySelectorAll('.dlrow')].find((e) => e.dataset.key === p.id); if (row) paintDl(row, x);
   }
+  if (p.done && !p.cancelled && p.pct === 100) addNotif({ kind: 'download', title: 'Download complete', body: p.id.startsWith('PL:') ? `Playlist: ${p.item} of ${p.total} items` : (x?.title || x?.item || p.id) });
   if (p.id.startsWith('PL:')) {
     const el = $('#pl-progress'), cancel = $('#pl-cancel');
     if (el) el.textContent = p.done ? (p.cancelled ? 'Download cancelled.' : p.pct === 100 ? `Done: ${p.item} of ${p.total} items saved.` : `Finished with errors (${p.item} of ${p.total}).`) : `Item ${p.item || '?'} of ${p.total || '?'} — ${p.pct}%`;
@@ -1632,15 +1681,17 @@ function setCaptionTrack(vtt) {
   t.addEventListener('load', () => { for (const c of t.track.cues || []) { c.snapToLines = true; c.line = 'auto'; c.position = 'auto'; c.size = 100; c.align = 'center'; } });
   video.appendChild(t); t.track.mode = 'showing';
 }
+// Applies the caption list (it arrives with the video details) and turns the preferred one on.
+function setCaptionTracks(list) {
+  let l = list || [];
+  if (settings.subAllowAuto === false) l = l.filter((t) => !t.auto);
+  capTracks = l; renderToolbar(); paintRc();
+  const want = (settings.subLang || '').toLowerCase();
+  const pref = want && (l.find((x) => x.lang.toLowerCase() === want && !x.auto) || l.find((x) => x.lang.toLowerCase() === want) || l.find((x) => x.lang.toLowerCase().startsWith(want)));
+  if (settings.subDefaultOn && pref) chooseCaption(pref.lang + (pref.auto ? '|a' : '|m'));
+}
 async function loadCaptionList(id) {
-  try {
-    let l = await api.subsList(id); if (current?.id !== id) return;
-    if (settings.subAllowAuto === false) l = l.filter((t) => !t.auto);
-    capTracks = l; renderToolbar(); paintRc();
-    const want = (settings.subLang || '').toLowerCase();
-    const pref = want && (l.find((x) => x.lang.toLowerCase() === want) || l.find((x) => x.lang.toLowerCase().startsWith(want)));
-    if (settings.subDefaultOn && pref) chooseCaption(pref.lang + (pref.auto ? '|a' : '|m'));
-  } catch {}
+  try { const l = await api.subsList(id); if (current?.id === id) setCaptionTracks(l); } catch {}
 }
 async function chooseCaption(val) {
   if (!val) { capLang = ''; setCaptionTrack(null); renderToolbar(); return; }
@@ -1731,7 +1782,7 @@ function saveProgress(done) {
   // A video you only started keeps its red progress bar; it counts as watched (hidden from Subscriptions) once you pass the chosen share (Settings, Playback).
   if (!settings.pauseHistory && p[current.id].pct >= (+settings.watchedAt || 50) && !isWatched(current.id)) setWatched(current.id, true);
 }
-video.addEventListener('pause', () => saveProgress()); // keep the bar accurate when you stop, not just every few seconds
+video.addEventListener('pause', () => { if (video.currentSrc) saveProgress(); }); // keep the bar accurate when you stop, not just every few seconds
 video.addEventListener('timeupdate', () => {
   if (settings.sponsorblock) {
     for (const s of segments) {
@@ -1762,7 +1813,7 @@ video.addEventListener('error', () => {
 video.addEventListener('ended', () => {
   saveProgress(true); if (sleepEnding) return fireSleep();
   if (video.loop) return;
-  if (showEndScreen()) return;
+  if (!awayNow() && showEndScreen()) return;
   playNext();
 });
 // The main process needs to know whether something is playing (for the mini player's open-on-minimize option).
@@ -1780,9 +1831,9 @@ function nextVideo() {
 }
 function playNext(manual) {
   const n = nextVideo();
-  if (!n || (!manual && !autoAllows(n.kind))) { if (!manual) api.notify('queue', 'Finished', n ? 'The queue or playlist is done.' : 'Nothing left to play.').catch(() => {}); return; }
+  if (!n || (!manual && !autoAllows(n.kind))) { if (!manual) notify('queue', 'Finished', n ? 'The queue or playlist is done.' : 'Nothing left to play.'); return; }
   if (n.kind === 'queue') userQueue.shift();
-  openVideo(n.v, n.kind === 'related' ? { replace: true } : { replace: true, keep: true });
+  openVideo(n.v, { replace: true, stay: awayNow(), ...(n.kind === 'related' ? {} : { keep: true }) }); // from the floating player the next one stays there
 }
 
 // ---------- media keys / tray / mini ----------
@@ -1801,7 +1852,7 @@ if (navigator.mediaSession) {
 
 // ---------- in-player settings menu (quality, speed, subtitles, sleep timer, buffer) ----------
 const SLEEP_OPTS = [['0', 'Off'], ['15', '15 minutes'], ['30', '30 minutes'], ['45', '45 minutes'], ['60', '1 hour'], ['90', '1.5 hours'], ['120', '2 hours'], ['end', 'End of this video']];
-const BUFFER_OPTS = [['15', '15 seconds'], ['30', '30 seconds'], ['60', '1 minute'], ['120', '2 minutes'], ['300', '5 minutes']];
+const BUFFER_OPTS = [['15', '15 seconds'], ['30', '30 seconds'], ['60', '1 minute'], ['120', '2 minutes'], ['180', '3 minutes'], ['300', '5 minutes'], ['600', '10 minutes'], ['1200', '20 minutes'], ['1800', '30 minutes']];
 let sleepEnd = 0, sleepEnding = false, sleepTimer = null, sleepVol = null, sleepShown = -1;
 function sleepLabel() { return sleepEnding ? 'End of video' : sleepEnd ? Math.ceil((sleepEnd - Date.now()) / 60000) + ' min left' : 'Off'; }
 function restoreSleepVolume() { if (sleepVol != null) { video.volume = sleepVol; sleepVol = null; } }
@@ -1816,7 +1867,7 @@ function setSleep(v) {
 function fireSleep() {
   clearSleep(); video.pause(); restoreSleepVolume(); renderToolbar();
   toast('Sleep timer: paused');
-  api.notify('sleep', 'Sleep timer', 'Playback paused.').catch(() => {});
+  notify('sleep', 'Sleep timer', 'Playback paused.');
   if (settings.sleepAction === 'quit') api.quit();
 }
 function sleepTick() {
@@ -1837,7 +1888,7 @@ function pmRows() {
     speed: { title: 'Speed', value: () => speed + 'x', opts: () => TOOLS.speed.select, cur: () => String(speed), pick: (v) => setSpeed(parseFloat(v)) },
     captions: { title: 'Subtitles', value: () => (capLang ? optLabel(TOOLS.captions.select(), capLang) : capTracks.length ? 'Off' : 'None'), opts: () => TOOLS.captions.select(), cur: () => capLang, pick: (v) => chooseCaption(v), footer: ['Subtitle settings…', () => { sTab = 'subtitles'; openSettings(); }] },
     sleep: { title: 'Sleep timer', value: sleepLabel, opts: () => SLEEP_OPTS, cur: () => (sleepEnding ? 'end' : sleepEnd ? '' : '0'), pick: (v) => setSleep(v) },
-    buffer: { title: 'Buffer', value: () => (settings.bufferProxy === false ? 'Browser default' : optLabel(BUFFER_OPTS, settings.bufferSeconds || 60)), opts: () => BUFFER_OPTS, cur: () => String(settings.bufferSeconds || 60), pick: (v) => save({ bufferSeconds: +v, bufferProxy: true }) },
+    buffer: { title: 'Buffer', value: () => (settings.bufferProxy === false ? 'Browser default' : optLabel(BUFFER_OPTS, settings.bufferSeconds || 180)), opts: () => BUFFER_OPTS, cur: () => String(settings.bufferSeconds || 180), pick: (v) => save({ bufferSeconds: +v, bufferProxy: true }) },
   };
 }
 // Everything you can do to the video lives in this menu (the three dots on the player).
@@ -2023,6 +2074,8 @@ function showEndScreen() {
   return true;
 }
 video.addEventListener('play', hideEndScreen); // replaying (or pressing play) clears it
+// Seeking back (dragging the seek bar, an arrow key) also clears it, so the picture is visible and the countdown to the next video stops.
+video.addEventListener('seeking', () => { if (!$('#end-screen').hidden && video.currentTime < (video.duration || 0) - 1) hideEndScreen(); });
 
 // ---------- chapters (from timestamps in the description) ----------
 let chapters = [], chapOpen = false;
@@ -2097,6 +2150,8 @@ function paintBar() {
 }
 let scrubbing = false;
 for (const ev of ['loadedmetadata', 'resize']) video.addEventListener(ev, () => renderPQuick());
+for (const ev of ['playing', 'canplay', 'error']) video.addEventListener(ev, () => pbox.classList.remove('loading'));
+video.addEventListener('waiting', () => { if (video.currentSrc) pbox.classList.add('loading'); });
 let lastBarPaint = 0;
 for (const ev of ['timeupdate', 'progress', 'durationchange', 'loadedmetadata', 'resize', 'play', 'pause', 'volumechange', 'seeked', 'emptied']) video.addEventListener(ev, (e) => {
   if (perf.power && (e.type === 'timeupdate' || e.type === 'progress') && Date.now() - lastBarPaint < 900) return; // power saving: about once a second
@@ -2133,11 +2188,21 @@ const showTip = (e) => {
   tip.style.left = Math.min(r.width - half, Math.max(half, f * r.width)) + 'px';
 };
 pseek.addEventListener('pointerdown', (e) => {
-  if (!vdur()) return; scrubbing = true; pseek.classList.add('drag'); pseek.setPointerCapture(e.pointerId);
-  const go = (ev) => { const f = seekFrac(ev); pseek.querySelector('.pplay').style.width = f * 100 + '%'; pseek.querySelector('.pknob').style.left = f * 100 + '%'; video.currentTime = f * vdur(); showTip(ev); };
-  go(e);
-  const mv = (ev) => go(ev), up = () => { scrubbing = false; pseek.classList.remove('drag'); pseek.removeEventListener('pointermove', mv); pseek.removeEventListener('pointerup', up); paintBar(); };
-  pseek.addEventListener('pointermove', mv); pseek.addEventListener('pointerup', up);
+  if (!vdur()) return; scrubbing = true; pseek.classList.add('drag'); try { pseek.setPointerCapture(e.pointerId); } catch {}
+  // While dragging, the bar follows the pointer at once but the video is only moved about seven times a second (and at the end): every
+  // seek makes the player start loading from that spot, and dozens of them a second just keep it from ever getting there.
+  let seekTimer = 0, seekTo = null;
+  const apply = () => { seekTimer = 0; if (seekTo != null) { video.currentTime = seekTo; seekTo = null; } };
+  const go = (ev) => {
+    const f = seekFrac(ev); pseek.querySelector('.pplay').style.width = f * 100 + '%'; pseek.querySelector('.pknob').style.left = f * 100 + '%';
+    seekTo = f * vdur(); if (!seekTimer) seekTimer = setTimeout(apply, 140); showTip(ev);
+  };
+  go(e); clearTimeout(seekTimer); apply(); // the first click moves the video straight away
+  const mv = (ev) => go(ev), up = () => {
+    clearTimeout(seekTimer); apply(); scrubbing = false; pseek.classList.remove('drag');
+    pseek.removeEventListener('pointermove', mv); pseek.removeEventListener('pointerup', up); pseek.removeEventListener('pointercancel', up); paintBar();
+  };
+  pseek.addEventListener('pointermove', mv); pseek.addEventListener('pointerup', up); pseek.addEventListener('pointercancel', up);
 });
 pseek.addEventListener('pointermove', (e) => { if (!scrubbing) showTip(e); });
 pseek.addEventListener('pointerleave', () => { if (!scrubbing) $('#ptip').hidden = true; });
@@ -2186,7 +2251,7 @@ function paintUpdatePanel(u) {
 function paintUpdate(u) {
   const bar = $('#update-bar'); if (!u) return;
   lastUpd = u; paintUpdatePanel(u);
-  if (u.status === 'available' && u.version && localStorage.getItem('updNotified') !== u.version) { localStorage.setItem('updNotified', u.version); api.notify('update', 'Update available', `YouTube Desktop ${u.version} is ready to install.`).catch(() => {}); }
+  if (u.status === 'available' && u.version && localStorage.getItem('updNotified') !== u.version) { localStorage.setItem('updNotified', u.version); notify('update', 'Update available', `YouTube Desktop ${u.version} is ready to install.`); }
   const v = esc(u.version || '');
   let html = '';
   if (u.status === 'available' && updDismissed !== u.version) html = `<span>Version <b>${v}</b> is available (you have ${esc(u.current)}).</span><button data-a="go">${u.auto ? 'Update' : 'Get it'}</button><button data-a="later" class="ghost">Later</button>`;
@@ -2249,7 +2314,7 @@ function paintRc() {
   const prevScroll = body.scrollTop;
   if (rcTab === 'chapters') {
     const k = chapAt(video.currentTime || 0);
-    body.innerHTML = chapters.map((c, i) => `<div class="rc-row${i === k ? ' cur' : ''}" data-i="${i}">${c.thumb ? `<img loading="lazy" src="${esc(c.thumb)}">` : '<span class="noimg"></span>'}<div class="tt"><span class="ti">${esc(c.title)}</span><span class="tm">${fmtDur(c.t)}</span></div><div class="acts"><button data-a="share" title="Copy link to this chapter">${ic('share')}</button><button data-a="loop" title="Loop this chapter" class="${chapLoop?.i === i ? 'on' : ''}">${ic('repeat')}</button></div></div>`).join('');
+    body.innerHTML = chapters.map((c, i) => `<div class="rc-row${i === k ? ' cur' : ''}" data-i="${i}">${c.thumb ? `<img loading="lazy" decoding="async" src="${esc(c.thumb)}">` : '<span class="noimg"></span>'}<div class="tt"><span class="ti">${esc(c.title)}</span><span class="tm">${fmtDur(c.t)}</span></div><div class="acts"><button data-a="share" title="Copy link to this chapter">${ic('share')}</button><button data-a="loop" title="Loop this chapter" class="${chapLoop?.i === i ? 'on' : ''}">${ic('repeat')}</button></div></div>`).join('');
     body.querySelectorAll('.rc-row').forEach((row) => {
       const i = +row.dataset.i, c = chapters[i];
       row.onclick = (e) => {
@@ -2347,7 +2412,7 @@ function switchTab(i) {
 }
 function closeCurrentTab() {
   if (userQueue.length) { openVideo(userQueue.shift(), { replace: true }); return; }
-  video.pause(); showMain(); current = null; renderTabs();
+  closePlayer();
 }
 const videoCardOf = (t) => t.closest?.('.card, .vrow, .lrow, .plrow, .subrow');
 document.addEventListener('mousedown', (e) => { if (e.button === 1 && videoCardOf(e.target)?._v) e.preventDefault(); }); // no autoscroll circle
@@ -2373,7 +2438,7 @@ function paintBell() {
   const all = settings.notifyUploadMode === 'all', on = all || !!bells()[current.channelId];
   b.innerHTML = ic(on ? 'bellon' : 'bell'); b.classList.toggle('on', on);
   b.title = all ? 'Notifications are on for every subscription (Settings, Notifications)' : on ? 'Notifications on for this channel' : 'Get notified about new videos from this channel';
-  b.hidden = settings.notifyOn === false;
+  b.hidden = settings.notifyUploadsOn === false;
 }
 wMenu($('#w-bell'), () => {
   const id = current.channelId, on = !!bells()[id], name = current.channel || 'this channel';
@@ -2385,7 +2450,7 @@ wMenu($('#w-bell'), () => {
 // ---------- desktop notifications ----------
 let notifTimer = 0, notifIntervalApplied;
 async function pollUploads() {
-  if (settings.notifyOn === false || settings.notifyUploadsOn === false || settings.notifyUploadMode === 'off' || perf.data) return;
+  if (settings.notifyUploadsOn === false || settings.notifyUploadMode === 'off' || perf.data) return;
   const mode = settings.notifyUploadMode || 'bell', b = bells();
   if (mode === 'bell' && !Object.keys(b).length) return;
   try { await fetchSubs(); } catch { return; }
@@ -2395,8 +2460,9 @@ async function pollUploads() {
   for (const v of vids) { if (have.has(v.id)) continue; have.add(v.id); if ((mode === 'all' || b[v.channelId]) && v.age <= 3 && !isWatched(v.id)) fresh.push(v); }
   lsSet('notifSeen', [...have].slice(-3000));
   if (!fresh.length) return;
-  if (fresh.length <= 3) for (const v of fresh) api.notify('upload', v.channel || 'New video', v.title, v.id);
-  else api.notify('upload', `${fresh.length} new videos`, [...new Set(fresh.map((v) => v.channel))].slice(0, 4).join(', '), fresh[0].id);
+  for (const v of fresh) addNotif({ kind: 'upload', title: v.channel || 'New video', body: v.title, vid: v.id, thumb: v.thumb });
+  if (fresh.length <= 3) for (const v of fresh) api.notify('upload', v.channel || 'New video', v.title, v.id).catch(() => {});
+  else api.notify('upload', `${fresh.length} new videos`, [...new Set(fresh.map((v) => v.channel))].slice(0, 4).join(', '), fresh[0].id).catch(() => {});
 }
 function scheduleNotifPoll() {
   clearInterval(notifTimer);
@@ -2479,6 +2545,111 @@ let edge = null;
 document.addEventListener('touchstart', (e) => { const t = e.touches[0]; edge = touchOn() && e.touches.length === 1 && (t.clientX < 24 || t.clientX > innerWidth - 24) ? { x: t.clientX, y: t.clientY, left: t.clientX < 24 } : null; }, { passive: true });
 document.addEventListener('touchend', (e) => { if (!edge) return; const t = e.changedTouches[0], dx = t.clientX - edge.x, dy = Math.abs(t.clientY - edge.y); if (dy < 60 && ((edge.left && dx > 90) || (!edge.left && dx < -90))) navGo(edge.left ? -1 : 1); edge = null; }, { passive: true });
 
+// ---------- get the next video ready ----------
+// Looking a video up (yt-dlp) takes a few seconds, so it is done ahead of time: when you rest the pointer on a video for a moment,
+// and a few seconds into the current one for whatever plays next. Off in data saver and power saving.
+const warmed = new Map();
+function warmVideo(id, urgent) {
+  if (!id || perf.data || perf.power || settings.prefetchNext === false) return;
+  const t = warmed.get(id); if (t && Date.now() - t < 10 * 60 * 1000) return;
+  warmed.set(id, Date.now()); if (warmed.size > 80) warmed.delete(warmed.keys().next().value);
+  api.prefetch(id, { data: perf.data, power: perf.power }, !!urgent).catch(() => {});
+}
+let hoverWarmT = 0, hoverWarmEl = null, nextWarmT = 0;
+document.addEventListener('mouseover', (e) => {
+  const c = videoCardOf(e.target); if (!c?._v || c === hoverWarmEl) return;
+  hoverWarmEl = c; clearTimeout(hoverWarmT); hoverWarmT = setTimeout(() => warmVideo(c._v.id, true), 350);
+}, { passive: true });
+document.addEventListener('mouseout', (e) => { if (hoverWarmEl && !hoverWarmEl.contains(e.relatedTarget)) { clearTimeout(hoverWarmT); hoverWarmEl = null; } }, { passive: true });
+video.addEventListener('playing', () => {
+  clearTimeout(nextWarmT);
+  nextWarmT = setTimeout(() => { const n = nextVideo(); if (n) warmVideo(n.v.id); for (const q of userQueue.slice(0, 2)) warmVideo(q.id); }, 6000);
+});
+
+// ---------- floating player: the video keeps playing in a corner while you browse ----------
+// The player stays where it is in the page; when the watch page is hidden it is simply pinned to a corner of the window (see the
+// #watch.away rules in the style sheet), so nothing is moved or reloaded and playback never stops.
+const floatOn = () => settings.floatPlayer !== false;
+const awayNow = () => $('#watch').classList.contains('away');
+function updateAway() {
+  const w = $('#watch'), away = floatOn() && w.hidden && !!current;
+  w.classList.toggle('away', away);
+  document.body.classList.toggle('has-mini', away);
+  document.documentElement.style.setProperty('--mini-w', ({ small: 300, medium: 380, large: 500 })[settings.floatSize || 'medium'] + 'px');
+  for (const c of ['br', 'bl', 'tr', 'tl']) document.body.classList.toggle('mini-' + c, (settings.floatCorner || 'br') === c);
+  if (away) paintMini();
+}
+function paintMini() {
+  const t = $('#mini-title'); if (t.textContent !== (current?.title || '')) t.textContent = current?.title || '';
+  const pl = $('#mini-play'), k = video.paused ? 'play' : 'pause'; if (pl.dataset.k !== k) { pl.dataset.k = k; pl.innerHTML = ic(k); }
+}
+// Stops the video and clears the player altogether (the x on the floating player, closing a tab).
+function closePlayer() {
+  saveProgress(); histTime(); histSent = null; ++loadSeq; resetMedia(); video.poster = ''; pbox.classList.remove('loading');
+  current = null; if (!$('#watch').hidden) showMain();
+  updateAway(); renderTabs();
+}
+$('#mini-ui').addEventListener('click', (e) => {
+  if (e.target.closest('button')) return;
+  if (current) openVideo(current); // back to the video page, no reload
+});
+$('#mini-expand').onclick = () => { if (current) openVideo(current); };
+$('#mini-close').onclick = closePlayer;
+$('#mini-play').onclick = () => (video.paused ? video.play().catch(() => {}) : video.pause());
+for (const b of $('#mini-ui').querySelectorAll('button')) { b.tabIndex = -1; b.addEventListener('mousedown', (e) => e.preventDefault()); } // keep the keyboard shortcuts working after a click
+$('#mini-next').onclick = () => playNext(true);
+for (const ev of ['play', 'pause', 'emptied']) video.addEventListener(ev, () => { if (awayNow()) paintMini(); });
+video.addEventListener('timeupdate', () => { if (awayNow()) $('#mini-fill').style.width = (vdur() ? (video.currentTime / vdur()) * 100 : 0) + '%'; });
+
+// ---------- notification center: the bell in the header ----------
+// Everything the app wants to tell you (new videos from channels you follow, finished downloads, updates, the sleep timer) is kept here
+// as well as being shown as a desktop notification, so you can look at it later.
+const NOTIF_MAX = 60;
+const notifList = () => lsGet('notifs', []);
+function addNotif(n) {
+  if (settings.bellOn === false) return;
+  const l = notifList();
+  if (n.vid && l.some((x) => x.kind === n.kind && x.vid === n.vid)) return; // each video is announced once
+  if (!n.vid && l.some((x) => x.kind === n.kind && x.title === n.title && x.body === n.body && Date.now() - x.t < 10 * 60 * 1000)) return; // and the same message is not repeated within ten minutes
+  l.unshift({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: Date.now(), read: false, ...n });
+  lsSet('notifs', l.slice(0, NOTIF_MAX));
+  paintBellBadge(); if (!$('#notif-panel').hidden) paintNotifPanel();
+}
+// The in-app list plus the desktop popup (which the settings may suppress).
+function notify(kind, title, body, vid, extra) { addNotif({ kind, title, body, vid, ...extra }); return api.notify(kind, title, body, vid).catch(() => false); }
+function paintBellBadge() {
+  const btn = $('#bell-btn'), badge = $('#bell-badge'), n = notifList().filter((x) => !x.read).length;
+  btn.hidden = settings.bellOn === false;
+  badge.hidden = !n; badge.textContent = n > 9 ? '9+' : String(n);
+  btn.classList.toggle('has', n > 0);
+}
+const agoText = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); if (m < 1) return 'just now'; if (m < 60) return m + ' min ago'; const h = Math.round(m / 60); if (h < 24) return h + ' h ago'; const d = Math.round(h / 24); return d + (d === 1 ? ' day ago' : ' days ago'); };
+function paintNotifPanel() {
+  const el = $('#notif-panel'), l = notifList();
+  el.innerHTML = `<div class="np-head"><b>Notifications</b><span class="grow"></span><button data-a="read" ${l.some((x) => !x.read) ? '' : 'disabled'}>Mark all as read</button><button data-a="clear" ${l.length ? '' : 'disabled'}>Clear</button><button data-a="settings" title="Notification settings">${ic('gear')}</button></div>
+    <div class="np-list">${l.length ? l.map((n) => `<div class="np-row${n.read ? '' : ' unread'}" data-id="${esc(n.id)}">${n.thumb ? `<img loading="lazy" decoding="async" src="${esc(n.thumb)}">` : `<span class="np-ico">${ic(n.kind === 'download' ? 'download' : n.kind === 'update' ? 'up' : n.kind === 'upload' ? 'play' : 'bell')}</span>`}<div class="np-tx"><div class="np-t">${esc(n.title || '')}</div><div class="np-b">${esc(n.body || '')}</div><div class="np-a">${agoText(n.t)}</div></div>${n.read ? '' : '<i class="np-dot"></i>'}</div>`).join('') : '<div class="np-empty">Nothing yet. Turn on the bell under a video to hear about a channel\'s new uploads.</div>'}</div>`;
+  el.querySelector('[data-a=read]').onclick = () => { const x = notifList(); x.forEach((n) => (n.read = true)); lsSet('notifs', x); paintBellBadge(); paintNotifPanel(); };
+  el.querySelector('[data-a=clear]').onclick = () => { lsSet('notifs', []); paintBellBadge(); paintNotifPanel(); };
+  el.querySelector('[data-a=settings]').onclick = () => { closeNotifPanel(); openSettings(); setTimeout(() => [...document.querySelectorAll('#s-tabs a')].find((a) => a.textContent === 'Notifications')?.click(), 60); };
+  el.querySelectorAll('.np-row').forEach((row) => (row.onclick = () => {
+    const x = notifList(), n = x.find((i) => i.id === row.dataset.id); if (!n) return;
+    n.read = true; lsSet('notifs', x); paintBellBadge(); closeNotifPanel();
+    if (n.vid) { const v = (lsGet('subcache', { videos: [] }).videos || []).find((i) => i.id === n.vid) || { id: n.vid, title: n.body || '', channel: n.title, thumb: n.thumb || '' }; openVideo(v); }
+    else if (n.kind === 'download') document.querySelector('#side [data-nav=downloads]')?.click();
+    else if (n.kind === 'update') { openSettings(); setTimeout(() => [...document.querySelectorAll('#s-tabs a')].find((a) => a.textContent === 'General')?.click(), 60); }
+  }));
+}
+function openNotifPanel() { paintNotifPanel(); $('#notif-panel').hidden = false; }
+function closeNotifPanel() {
+  const el = $('#notif-panel'); if (el.hidden) return; el.hidden = true;
+  const x = notifList(); if (x.some((n) => !n.read)) { x.forEach((n) => (n.read = true)); lsSet('notifs', x); } // looking at them counts as reading
+  paintBellBadge();
+}
+$('#bell-btn').onclick = (e) => { e.stopPropagation(); $('#notif-panel').hidden ? openNotifPanel() : closeNotifPanel(); };
+document.addEventListener('click', (e) => { if (!$('#notif-panel').hidden && !e.target.closest('#notif-panel, #bell-btn')) closeNotifPanel(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#notif-panel').hidden) { e.stopPropagation(); closeNotifPanel(); } }, true);
+paintBellBadge();
+
 let volT;
 video.addEventListener('volumechange', () => {
   clearTimeout(volT);
@@ -2502,6 +2673,16 @@ document.addEventListener('keydown', (e) => {
   if (e.target.matches?.('input,textarea,select')) return;
   if (e.key === '/') { e.preventDefault(); $('#search').focus(); return; }
   if (e.key === '?') { e.preventDefault(); showShortcuts(); return; }
+  if ($('#watch').hidden && awayNow()) { // a few shortcuts work for the floating player too
+    const k = e.key.toLowerCase();
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (k === ' ' || k === 'k') { e.preventDefault(); video.paused ? video.play() : video.pause(); }
+    else if (k === 'm') video.muted = !video.muted;
+    else if (k === 'j') video.currentTime -= 10;
+    else if (k === 'l') video.currentTime += 10;
+    else if (e.shiftKey && k === 'n') playNext(true);
+    return;
+  }
   if ($('#watch').hidden) return;
   const k = e.key.toLowerCase();
   if (e.shiftKey && k === 'n') { playNext(true); return; }
@@ -2533,7 +2714,7 @@ document.addEventListener('keydown', (e) => {
   video.volume = settings.rememberVolume !== false && settings.lastVolume != null ? settings.lastVolume : Math.min(1, Math.max(0, (settings.defaultVolume ?? 100) / 100));
   video.muted = settings.rememberVolume !== false && !!settings.lastMuted;
   if (signedIn()) fetchSubs().then(renderSideSubs).catch(() => {});
-  syncProgress(); setInterval(syncProgress, 30 * 60 * 1000);
+  setTimeout(syncProgress, 6000); setInterval(syncProgress, 30 * 60 * 1000); // (a few seconds after start-up, so the first page is not kept waiting)
   const start = { subs: () => document.querySelector('#side [data-nav=subs]').click(), playlists: () => document.querySelector('#side [data-nav=playlists]').click(), history: () => document.querySelector('#side [data-nav=history]').click() }[settings.startPage];
   (start || goHome)();
 })();

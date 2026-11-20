@@ -912,3 +912,63 @@ body.touch .pillbtn{padding:12px 16px}
 body.touch .rchip{padding:11px 16px}
 body.touch .rc-row{padding:10px 12px}
 body.touch .tr-row{padding:10px 14px;font-size:15px}
+/* picture while a video is being found, and the spinner */
+#player-box.loading::after{content:"";position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border:4px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:ytd-spin .8s linear infinite;z-index:4;pointer-events:none}
+@keyframes ytd-spin{to{transform:rotate(360deg)}}
+#video{object-fit:contain}
+
+/* ---------- floating player ---------- */
+/* While you browse, the watch page is hidden but the video lives on in a corner: #watch becomes an empty, invisible, fixed box and only the player inside it is shown. */
+#watch[hidden].away{display:block!important;position:fixed;left:0;top:0;width:0;height:0;min-width:0;overflow:visible;visibility:hidden;pointer-events:none;padding:0;margin:0;border:0;gap:0;animation:none!important;transform:none!important}
+#watch.away #player-area{margin:0!important;padding:0}
+#watch.away #player-box{visibility:visible;pointer-events:auto;position:fixed;right:var(--mini-gap,16px);bottom:var(--mini-gap,16px);left:auto;top:auto;width:var(--mini-w,380px);height:auto!important;aspect-ratio:16/9!important;border-radius:12px!important;margin:0!important;z-index:40;box-shadow:0 10px 36px rgba(0,0,0,.55);overflow:hidden;cursor:pointer}
+body.mini-bl #watch.away #player-box{left:var(--mini-gap,16px);right:auto}
+body.mini-tr #watch.away #player-box{top:calc(var(--mini-gap,16px) + 56px);bottom:auto}
+body.mini-tl #watch.away #player-box{left:var(--mini-gap,16px);right:auto;top:calc(var(--mini-gap,16px) + 56px);bottom:auto}
+#watch.away #pbar,#watch.away #p-menu,#watch.away #end-screen,#watch.away #sb-toast,#watch.away #p-bigplay,#watch.away #p-skip,#watch.away #ptip{display:none!important}
+#mini-ui{display:none;position:absolute;inset:0;z-index:7;color:#fff;background:linear-gradient(rgba(0,0,0,.6),transparent 38%,transparent 60%,rgba(0,0,0,.6));opacity:0;transition:opacity .15s}
+#watch.away #mini-ui{display:block}
+#watch.away #player-box:hover #mini-ui,body.touch #watch.away #mini-ui{opacity:1}
+#mini-ui .mini-top{position:absolute;left:10px;right:8px;top:6px;display:flex;align-items:center;gap:6px}
+#mini-title{flex:1;min-width:0;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mini-ui button{background:rgba(0,0,0,.55);color:#fff;border-radius:50%;width:32px;height:32px;min-height:0;padding:0;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#mini-ui button:hover{background:rgba(0,0,0,.85);filter:none}
+#mini-ui .ico{width:18px;height:18px}
+#mini-play{position:absolute!important;left:50%;top:50%;transform:translate(-50%,-50%);width:54px!important;height:54px!important}
+#mini-play .ico{width:26px!important;height:26px!important}
+#mini-next{position:absolute!important;right:10px;bottom:12px}
+#mini-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.25)}
+#mini-fill{height:100%;width:0;background:var(--pb-accent,#f03)}
+body.touch #mini-ui button{width:44px;height:44px;min-height:44px}
+body.touch{--mini-gap:20px}
+@media (max-width:700px){#watch.away #player-box{width:min(var(--mini-w,380px),62vw)}}
+#watch.away > #details,#watch.away > #right-col,#watch.away #player-area > :not(#player-box){display:none!important}
+
+/* ---------- notification bell ---------- */
+#bell-btn{background:none;position:relative;padding:8px 10px;display:inline-flex;align-items:center;justify-content:center}
+#bell-btn .ico{width:22px;height:22px}
+#bell-btn[hidden]{display:none}
+#bell-btn.has{color:var(--fg)}
+#bell-badge{position:absolute;top:1px;right:2px;background:var(--accent);color:#fff;border-radius:9px;font-size:10px;font-weight:700;line-height:16px;min-width:16px;padding:0 4px;text-align:center}
+#bell-badge[hidden]{display:none}
+#notif-panel{position:fixed;top:60px;right:12px;width:min(420px,94vw);max-height:min(70vh,560px);display:flex;flex-direction:column;background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.5);z-index:55;overflow:hidden}
+#notif-panel[hidden]{display:none}
+.np-head{display:flex;align-items:center;gap:6px;padding:12px 14px;border-bottom:1px solid var(--line);font-size:15px}
+.np-head .grow{flex:1}
+.np-head button{padding:5px 10px;font-size:12px;border-radius:14px;min-height:0}
+.np-head button:disabled{opacity:.4;cursor:default}
+.np-head .ico{width:16px;height:16px}
+.np-list{overflow:auto}
+.np-row{display:flex;gap:12px;align-items:center;padding:10px 14px;cursor:pointer}
+.np-row:hover{background:var(--bg3)}
+.np-row img{width:88px;height:50px;object-fit:cover;border-radius:6px;flex-shrink:0;background:var(--bg3)}
+.np-ico{width:44px;height:44px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.np-ico .ico{width:20px;height:20px}
+.np-tx{flex:1;min-width:0}
+.np-t{font-weight:600;font-size:13px}
+.np-b{font-size:13px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.np-a{font-size:12px;color:var(--fg2);margin-top:2px}
+.np-dot{width:9px;height:9px;border-radius:50%;background:#3ea6ff;flex-shrink:0}
+.np-empty{padding:28px 18px;color:var(--fg2);font-size:13px;text-align:center;line-height:1.5}
+body.touch #notif-panel{top:72px}
+body.touch .np-row{padding:14px}

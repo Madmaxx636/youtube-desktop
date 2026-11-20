@@ -248,7 +248,7 @@ const DEF = {
   dlContainer: 'mp4', dlMaxHeight: 1080, dlCodec: 'auto', dlFps: 0, dlAudioFormat: 'mp3', dlAudioQuality: '0',
   dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
   dlTemplate: '%(title)s [%(id)s].%(ext)s', dlRateLimit: '', dlFragments: 4, dlPlaylistFolders: true, dlNotify: true,
-  bufferProxy: true, bufferSeconds: 60,
+  bufferProxy: true, bufferSeconds: 180, bufferMaxMB: 1024,
   miniSize: 'medium', miniCorner: 'bottom-right', miniOnTop: true, miniOpacity: 100, miniFrameless: true, miniOnMinimize: false, miniMargin: 16,
 };
 const cfg = () => ({ ...DEF, ...store.read() });
@@ -264,7 +264,9 @@ function acodecFilter(c) { return c === 'aac' ? '[acodec^=mp4a]' : c === 'opus' 
 const sortArgs = (c) => {
   const f = [];
   if (c.audioLang !== 'any') f.push('lang');
-  if (c.maxBitrate !== false) f.push('res', 'fps', 'vbr', 'tbr', 'abr', 'asr');
+  // 'proto' keeps plain https formats ahead of the HLS ones: HLS lists an estimated peak bitrate that is often far above what the
+  // file really holds, so sorting by it picked slow-starting HLS streams with no extra quality.
+  if (c.maxBitrate !== false) f.push('res', 'fps', 'proto', 'vbr', 'tbr', 'abr', 'asr');
   return f.length ? ['-S', f.join(',')] : [];
 };
 // A specific audio language (say "es") is asked for first; if the video has no such track the normal pick is used.
@@ -363,52 +365,161 @@ function runJob(key, url, args, { playlist = false } = {}) {
 
 
 // ---------- local streaming cache ----------
-// The player reads video and audio from a loopback server instead of straight from YouTube. The server pulls the
-// file in steady 2 MB ranges (the same pattern yt-dlp uses to avoid throttling) and keeps the chosen number of
-// seconds downloaded ahead of the playhead, so short network hiccups never reach the player.
-const CHUNK = 2 * 1024 * 1024, MAX_CONCURRENT = 6;
-const maxAheadBytes = () => (perfNow.power ? 48 : perfNow.data ? 64 : 192) * 1024 * 1024; // the cache lives in memory, so keep it modest
+// The player reads video and audio from a loopback server instead of straight from YouTube. The server pulls each file in
+// steady 2 MB ranges (the pattern yt-dlp uses to avoid throttling) and keeps the chosen number of seconds downloaded ahead of
+// the playhead, so short network hiccups never reach the player. A big buffer (a few minutes of 4K is a gigabyte) lives on
+// disk in a temporary folder so memory stays small; the folder is emptied when the app quits.
+const CHUNK = 2 * 1024 * 1024, MB = 1024 * 1024, MAX_CONCURRENT = 6, MAX_LOW = 4;
 const PROXY_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
-const streamsMap = new Map();
-let proxyPromise = null, proxyPort = 0, activeFetches = 0;
-const fetchQ = { hi: [], lo: [] };
-function acquireSlot(entry, hi) {
-  return new Promise((resolve) => { if (activeFetches < MAX_CONCURRENT) { activeFetches++; return resolve(); } entry.resolve = resolve; (hi ? fetchQ.hi : fetchQ.lo).push(entry); });
+// Not the system temp folder: on many Linux systems that is memory (tmpfs), which would defeat the point of a disk buffer.
+let CACHE_PARENT;
+try { CACHE_PARENT = path.join(app.getPath('cache'), 'youtube-desktop-streams'); } catch { CACHE_PARENT = path.join(os.tmpdir(), 'youtube-desktop-streams'); }
+const CACHE_ROOT = path.join(CACHE_PARENT, String(process.pid));
+// folders left behind by an earlier run that did not exit cleanly
+function sweepOldCaches() {
+  try {
+    for (const n of fs.readdirSync(CACHE_PARENT)) {
+      if (!/^\d+$/.test(n) || +n === process.pid) continue;
+      let alive = false; try { process.kill(+n, 0); alive = true; } catch {}
+      if (!alive) fs.rmSync(path.join(CACHE_PARENT, n), { recursive: true, force: true });
+    }
+  } catch {}
 }
-function releaseSlot() { activeFetches--; const e = fetchQ.hi.shift() || fetchQ.lo.shift(); if (e) { activeFetches++; e.resolve(); } }
-function boostEntry(entry) { const i = fetchQ.lo.indexOf(entry); if (i >= 0) { fetchQ.lo.splice(i, 1); fetchQ.hi.push(entry); } }
+// How much to keep ahead, and the most a stream may hold, for the current mode.
+function bufferPolicy() {
+  const c = cfg();
+  if (perfNow.power) return { secs: 20, cap: 48 * MB };
+  if (perfNow.data) return { secs: 15, cap: 64 * MB };
+  return { secs: Math.min(3600, Math.max(5, num(c.bufferSeconds) || 180)), cap: Math.max(64, num(c.bufferMaxMB) || 1024) * MB };
+}
+const streamsMap = new Map();
+let proxyPromise = null, proxyPort = 0, activeFetches = 0, activeLo = 0, activeHi = 0;
+const fetchQ = { hi: [], lo: [] };
+// At most MAX_CONCURRENT downloads run at once, and at most MAX_LOW of them may be look-ahead ones: the chunk playback is waiting for
+// always gets a connection right away and a good share of the bandwidth instead of queueing behind the buffer fill.
+// While a chunk the player is waiting for is downloading (or waiting its turn), no new look-ahead download starts.
+function canStart(hi) { return activeFetches < MAX_CONCURRENT && (hi || (activeLo < MAX_LOW && activeHi === 0 && !fetchQ.hi.length)); }
+function startEntry(entry) { activeFetches++; entry.lo = !entry.hi; if (entry.lo) activeLo++; else activeHi++; entry.resolve(); }
+function pump() {
+  for (;;) {
+    const e = fetchQ.hi.length && canStart(true) ? fetchQ.hi.shift() : fetchQ.lo.length && canStart(false) ? fetchQ.lo.shift() : null;
+    if (!e) return; startEntry(e);
+  }
+}
+function acquireSlot(entry, hi) {
+  return new Promise((resolve, reject) => {
+    entry.hi = hi; entry.resolve = resolve; entry.reject = reject;
+    if (canStart(hi)) return startEntry(entry);
+    (hi ? fetchQ.hi : fetchQ.lo).push(entry);
+  });
+}
+function releaseSlot(entry) { activeFetches--; if (entry.lo) activeLo--; else activeHi--; pump(); }
+function boostEntry(entry) { const i = fetchQ.lo.indexOf(entry); if (i >= 0) { fetchQ.lo.splice(i, 1); entry.hi = true; fetchQ.hi.push(entry); pump(); } }
+const PIPE_AHEAD = () => (HIDDEN && globalThis.__pipeAhead != null ? globalThis.__pipeAhead : 1); // chunks fetched in parallel with the needed one after a jump (test mode can change it)
+// Cancel a download (started or still waiting). Only for ones nothing is waiting on.
+function abortEntry(e) {
+  e.aborted = true; e.ctl?.abort();
+  for (const q of [fetchQ.hi, fetchQ.lo]) { const i = q.indexOf(e); if (i >= 0) { q.splice(i, 1); e.reject(new Error('dropped')); } }
+}
+// A seek makes the look-ahead meant for the old spot useless; the downloads of it still under way stop too, so the bandwidth goes to
+// where the player is now. (Entries a response is waiting on are left alone.)
+function abortLookahead(st) {
+  for (const e of st.chunks.values()) if (!e.done && !e.refs && (e.lo || e.pipe)) abortEntry(e);
+}
+// Forget the downloads queued (not started) for a stream, e.g. after a seek or when a newer video took over.
+function dropQueued(st) {
+  for (let i = fetchQ.lo.length - 1; i >= 0; i--) if (fetchQ.lo[i].st === st) { const e = fetchQ.lo.splice(i, 1)[0]; e.reject(new Error('dropped')); }
+}
 async function fetchChunk(st, ci, entry, hi) {
-  const a = ci * CHUNK, b = Math.min(a + CHUNK - 1, st.size - 1);
+  const a = ci * CHUNK, b = Math.min(a + CHUNK - 1, st.size - 1), t0 = Date.now();
   await acquireSlot(entry, hi);
+  const t1 = Date.now();
   try {
     for (let tries = 0; ; tries++) {
       try {
-        const r = await fetch(`${st.url}&range=${a}-${b}`, { headers: { 'User-Agent': PROXY_UA } });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const buf = Buffer.from(await r.arrayBuffer());
+        if (entry.aborted) throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
+        entry.ctl = new AbortController(); // a download nobody wants any more (a seek, a newer video) can be cancelled
+        // A chunk the player is waiting for is fetched as two halves at once: one connection tops out around 1.5 MB/s, two get it done in half the time.
+        const get = async (x, y) => { const r = await fetch(`${st.url}&range=${x}-${y}`, { headers: { 'User-Agent': PROXY_UA }, signal: entry.ctl.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return Buffer.from(await r.arrayBuffer()); };
+        const parts = hi && b - a > 256 * 1024 ? 2 : 1, mid = a + Math.floor((b - a + 1) / parts);
+        const buf = parts === 2 ? Buffer.concat(await Promise.all([get(a, mid - 1), get(mid, b)])) : await get(a, b);
         if (buf.length !== b - a + 1) throw new Error('short read');
+        if (HIDDEN) (globalThis.__chunkLog ||= []).push([st.mime.slice(0, 1), ci, hi ? 'hi' : 'lo', t1 - t0, Date.now() - t1, Date.now()]); // test mode only
         return buf;
-      } catch (e) { if (tries >= 2) throw e; await new Promise((r) => setTimeout(r, 300 * (tries + 1))); }
+      } catch (e) { if (e.name === 'AbortError' || tries >= 2) throw e; await new Promise((r) => setTimeout(r, 300 * (tries + 1))); }
     }
-  } finally { releaseSlot(); }
+  } finally { releaseSlot(entry); }
 }
-function chunk(st, ci, hi) {
+async function storeChunk(st, ci, buf) {
+  if (!st.disk) return { buf };
+  try {
+    const dir = path.join(CACHE_ROOT, st.token);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = path.join(dir, String(ci));
+    await fs.promises.writeFile(file, buf);
+    return { file };
+  } catch { return { buf }; } // disk trouble: keep this one in memory instead
+}
+async function readChunk(st, ci, rec) {
+  if (rec.buf) return rec.buf;
+  let b = st.hot.get(ci);
+  if (!b) { b = await fs.promises.readFile(rec.file); st.hot.set(ci, b); if (st.hot.size > 3) st.hot.delete(st.hot.keys().next().value); }
+  return b;
+}
+function forgetChunk(st, ci) {
+  const e = st.chunks.get(ci); st.chunks.delete(ci); st.hot.delete(ci);
+  e?.p.then((rec) => { if (rec?.file) fs.promises.unlink(rec.file).catch(() => {}); }).catch(() => {});
+}
+// Once a stream holds more than its limit, chunks behind the playhead go first (the oldest of them); if there are none, the
+// ones farthest ahead. Only finished chunks count: the look-ahead entries that are still waiting to download take no room.
+function evict(st) {
+  const cap = Math.max(8, Math.floor(st.policy.cap / CHUNK)), done = [];
+  for (const [k, e] of st.chunks) if (e.done) done.push([k, e]);
+  let over = done.length - cap; if (over <= 0) return;
+  const here = st.lastCi ?? 0, last = Math.ceil(st.size / CHUNK) - 1;
+  for (let i = done.length - 1; i >= 0; i--) if (done[i][0] <= 1 || done[i][0] >= last - 1) done.splice(i, 1); // the header and the index are never evicted: every seek, replay and restart needs them
+  const behind = done.filter(([k]) => k < here - 1).sort((a, b) => a[1].at - b[1].at);
+  for (const [k] of behind) { if (over-- <= 0) return; forgetChunk(st, k); }
+  const ahead = done.filter(([k]) => k >= here - 1).sort((a, b) => b[0] - a[0]);
+  for (const [k] of ahead) { if (over-- <= 0) return; forgetChunk(st, k); }
+}
+function chunk(st, ci, hi, pipe) {
   let entry = st.chunks.get(ci);
   if (!entry) {
-    entry = {};
-    entry.p = fetchChunk(st, ci, entry, hi);
-    entry.p.catch(() => st.chunks.delete(ci)); // a failed chunk is retried on the next request
+    entry = { st, at: Date.now(), done: false, refs: 0, pipe: !!pipe };
+    entry.p = fetchChunk(st, ci, entry, hi).then((buf) => storeChunk(st, ci, buf));
+    entry.p.then(() => { entry.done = true; entry.at = Date.now(); evict(st); }).catch(() => { if (st.chunks.get(ci) === entry) st.chunks.delete(ci); }); // a failed chunk is retried on the next request
     st.chunks.set(ci, entry);
-  } else if (hi) boostEntry(entry);
+  } else { entry.at = Date.now(); if (hi) boostEntry(entry); }
   return entry.p;
 }
 function prefetch(st, ci) {
-  const secs = perfNow.data ? 15 : perfNow.power ? 20 : Math.min(600, Math.max(5, num(cfg().bufferSeconds) || 60));
-  const bytesPerSec = st.dur ? st.size / st.dur : 400000;
-  const ahead = Math.max(2, Math.min(Math.ceil((secs * bytesPerSec) / CHUNK), Math.floor(maxAheadBytes() / CHUNK)));
-  for (let k = 1; k <= ahead; k++) if ((ci + k) * CHUNK < st.size) chunk(st, ci + k, false).catch(() => {});
-  for (const k of [...st.chunks.keys()]) if (k < ci - 1 || k > ci + ahead + 1) st.chunks.delete(k); // keeps memory bounded
+  if (st.retired) return;
+  const { secs, cap } = st.policy, bps = st.dur ? st.size / st.dur : 400000;
+  const ahead = Math.max(2, Math.min(Math.ceil((secs * bps) / CHUNK), Math.floor(cap / CHUNK) - 2));
+  for (let k = 1; k <= ahead; k++) { const n = ci + k; if (n * CHUNK < st.size) chunk(st, n, false).catch(() => {}); }
 }
+function trimStream(st, keep) {
+  const old = [...st.chunks.entries()].filter(([, e]) => e.done).sort((a, b) => b[1].at - a[1].at).slice(keep).map(([k]) => k);
+  for (const k of old) forgetChunk(st, k);
+}
+// When a newer video takes over, the older streams stop downloading ahead (they still answer requests, e.g. for the mini player window).
+function retireStreams() {
+  for (const st of streamsMap.values()) {
+    if (st.retired || st.warm) continue;
+    st.retired = true; dropQueued(st);
+    abortLookahead(st); // downloads of the old video already under way stop too
+    trimStream(st, 4);
+  }
+}
+function removeStream(token) {
+  const st = streamsMap.get(token); if (!st) return;
+  dropQueued(st); st.chunks.clear(); st.hot.clear(); streamsMap.delete(token);
+  fs.promises.rm(path.join(CACHE_ROOT, token), { recursive: true, force: true }).catch(() => {});
+}
+setInterval(() => {
+  for (const [k, s] of streamsMap) { const idle = Date.now() - (s.last || s.created); if (idle > (s.retired ? 2 * 60 * 1000 : 20 * 60 * 1000)) removeStream(k); }
+}, 60 * 1000).unref();
 async function handleProxy(req, res) {
   // The player runs the sound through Web Audio (stable audio), which needs the stream to be cross-origin readable.
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges' };
@@ -427,15 +538,31 @@ async function handleProxy(req, res) {
   res.writeHead(rg ? 206 : 200, { ...cors, 'Content-Type': st.mime, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Cache-Control': 'no-store', ...(rg ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}) });
   let closed = false;
   const gone = new Promise((r) => res.on('close', () => { closed = true; r(); }));
-  st.last = Date.now();
   try {
     let pos = start;
+    const nChunks = Math.ceil(size / CHUNK);
     while (pos <= end && !closed) {
       const ci = Math.floor(pos / CHUNK);
+      st.last = Date.now();
       const need = chunk(st, ci, true); // the chunk playback needs now jumps the queue
-      prefetch(st, ci);
-      const buf = await Promise.race([need, gone.then(() => null)]);
-      if (!buf) break;
+      const ent = st.chunks.get(ci); if (ent) ent.refs++;
+      // The player jumping somewhere else (a seek) makes the queue and the downloads meant for the old spot useless. Reads near the end of
+      // the file (the index) are only probes and do not count as a jump.
+      if (ci < nChunks - 2) {
+        if (st.lastCi == null || ci < st.lastCi || ci > st.lastCi + 2) { dropQueued(st); abortLookahead(st); st.sinceJump = 0; }
+        st.lastCi = ci;
+      }
+      // Right after a jump (or at the very start) the next chunk is needed straight away too, so it downloads in parallel.
+      if ((st.sinceJump ?? 0) < 3) for (let k = 1; k <= PIPE_AHEAD(); k++) if ((ci + k) * CHUNK < size) chunk(st, ci + k, true, true).catch(() => {});
+      st.sinceJump = (st.sinceJump ?? 0) + 1;
+      // Playback reached the end: get the start ready too, because the next thing is most likely a replay or a rewind.
+      if (ci >= nChunks - 2 && st.lastCi != null && st.lastCi >= nChunks - 10 && !st.endWarmed && !st.retired) { st.endWarmed = true; for (let k = 0; k < Math.min(6, nChunks); k++) chunk(st, k, false).catch(() => {}); }
+      let rec = null;
+      try { rec = await Promise.race([need, gone.then(() => null)]); }
+      finally { if (ent) { ent.refs--; if (closed && !ent.refs && !ent.done && ent.hi) abortEntry(ent); } } // the player gave up on this one (it seeked again)
+      if (!rec) break;
+      prefetch(st, ci); // the look-ahead starts once the chunk that is needed has arrived, so it never takes bandwidth from it
+      const buf = await readChunk(st, ci, rec);
       const piece = buf.subarray(pos - ci * CHUNK, Math.min(buf.length, end - ci * CHUNK + 1));
       if (!res.write(piece)) await Promise.race([new Promise((r) => res.once('drain', r)), gone]);
       pos += piece.length;
@@ -452,17 +579,41 @@ function ensureProxy() {
   return proxyPromise;
 }
 // Returns a loopback URL for a googlevideo URL, or the original URL if it can't be proxied.
-async function proxied(url, force) {
+async function proxied(url, force, warm) {
   if (!url || (cfg().bufferProxy === false && !force)) return url;
   let u; try { u = new URL(url); } catch { return url; }
   const size = Number(u.searchParams.get('clen'));
   if (!size || !/googlevideo\.com$/.test(u.hostname)) return url;
   await ensureProxy();
-  for (const [k, s] of streamsMap) if (Date.now() - (s.last || s.created) > 15 * 60 * 1000) { s.chunks.clear(); streamsMap.delete(k); }
-  while (streamsMap.size >= 8) { const [k, s] = streamsMap.entries().next().value; s.chunks.clear(); streamsMap.delete(k); }
-  const token = crypto.randomBytes(12).toString('hex');
-  streamsMap.set(token, { url, size, dur: Number(u.searchParams.get('dur')) || 0, mime: decodeURIComponent(u.searchParams.get('mime') || 'video/mp4'), chunks: new Map(), created: Date.now() });
+  while (streamsMap.size >= 10) { // make room: old finished streams first, then unused warm ones, never the one that is playing if avoidable
+    const all = [...streamsMap.entries()], victim = all.find(([, x]) => x.retired) || all.find(([, x]) => x.warm) || all[0];
+    removeStream(victim[0]);
+  }
+  const token = crypto.randomBytes(12).toString('hex'), dur = Number(u.searchParams.get('dur')) || 0, policy = bufferPolicy();
+  // a buffer worth more than about 48 MB goes to disk
+  const st = { warm: !!warm, token, url, size, dur, mime: decodeURIComponent(u.searchParams.get('mime') || 'video/mp4'), chunks: new Map(), hot: new Map(), created: Date.now(), policy, lastCi: null };
+  st.disk = Math.min(policy.cap, dur ? (policy.secs * size) / dur : policy.cap) > 48 * MB;
+  streamsMap.set(token, st);
+  // start on the first chunks before the player asks (a warm stream, i.e. one looked up ahead of time, gets a few more than usual)
+  for (let k = 0; k < (warm && st.mime.startsWith('video') ? 3 : 1); k++) chunk(st, k, true).catch(() => {});
   return `http://127.0.0.1:${proxyPort}/s/${token}`;
+}
+
+// A video that is being looked up ahead of time (hover, next in line) also gets its first chunks downloaded, so it starts at once.
+// These "warm" streams are handed over to the player when the video is opened, or dropped when too many pile up.
+const proxyToken = (u) => /\/s\/([0-9a-f]{24})$/.exec(String(u || ''))?.[1];
+async function warmStreams(r, force) {
+  if (r.warm || !r.lines) return;
+  r.warm = [];
+  for (const u of r.lines) r.warm.push(await proxied(u, force, true));
+  const warmOnes = [...streamsMap.entries()].filter(([, st]) => st.warm);
+  while (warmOnes.length > 6) removeStream(warmOnes.shift()[0]);
+}
+function takeWarm(url) {
+  const t = proxyToken(url), st = t && streamsMap.get(t);
+  if (!st || !st.warm) return null; // only an unused warm stream can be handed over; one that already played (and was retired) is made afresh
+  st.warm = false; st.created = Date.now();
+  return url;
 }
 
 // ---------- channel helpers ----------
@@ -512,6 +663,78 @@ async function statsPing(i, url, client, params) {
   if (oauth.shouldRefreshToken()) await oauth.refreshAccessToken();
   return fetch(u, { headers: { Authorization: `Bearer ${oauth.oauth2_tokens.access_token}`, 'User-Agent': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version' } });
 }
+// ---------- resolving a video: details (youtubei) and stream addresses (yt-dlp), each asked once and remembered ----------
+const infoCache = new Map(), captionUrls = new Map(), resolveCache = new Map();
+let prefetching = 0;
+function videoInfo(id) {
+  const hit = infoCache.get(id);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.p;
+  const p = (async () => {
+    const i = await innertube();
+    const info = await i.getInfo(id);
+    const b = info.basic_info;
+    const related = collectVideos(info.watch_next_feed || []);
+    const r = {
+      id, title: b.title, channel: b.author, channelId: b.channel_id,
+      views: b.view_count, likes: b.like_count, description: b.short_description,
+      duration: b.duration, keywords: b.keywords || [], isLive: b.is_live,
+      published: txt(info.primary_info?.published) || '',
+      relative: txt(info.primary_info?.relative_date) || '',
+      channelThumb: thumb(info.secondary_info?.owner?.author?.thumbnails) || '',
+      subs: txt(info.secondary_info?.owner?.subscriber_count) || '',
+      related,
+      loudnessDb: (() => { const v = info.page?.[0]?.player_config?.audio_config?.loudness_db; return typeof v === 'number' ? v : null; })(),
+      storyboard: (() => {
+        try {
+          const bs = (info.storyboards?.boards || []).filter((b) => b.template_url && b.thumbnail_width >= 80 && b.thumbnail_count > 0);
+          const b = bs.find((x) => x.thumbnail_width === 160) || bs[bs.length - 1]; if (!b) return null;
+          return { url: b.template_url, w: b.thumbnail_width, h: b.thumbnail_height, cols: b.columns, rows: b.rows, count: b.thumbnail_count, interval: b.interval };
+        } catch { return null; }
+      })(),
+      chapters: (() => {
+        try {
+          const mm = info.player_overlays?.decorated_player_bar?.player_bar?.markers_map;
+          const ch = mm?.find((m) => m.marker_key === 'DESCRIPTION_CHAPTERS')?.value?.chapters || [];
+          return ch.map((c) => ({ t: (c.time_range_start_millis || 0) / 1000, title: c.title?.text || String(c.title || ''), thumb: fixUrl((c.thumbnail || [])[0]?.url || '') })).filter((c) => c.title);
+        } catch { return []; }
+      })(),
+    };
+    // Captions come with the details, so no second yt-dlp run is needed just to list them.
+    const tracks = (info.captions?.caption_tracks || []).filter((t) => t.base_url && t.language_code);
+    captionUrls.set(id, tracks.map((t) => ({ lang: t.language_code, auto: t.kind === 'asr', url: t.base_url })));
+    capMap(captionUrls, 60);
+    r.captionTracks = tracks.map((t) => ({ lang: t.language_code, name: String(t.name?.text || t.language_code).replace(/\s*\(auto-generated\)/i, ' (auto)'), auto: t.kind === 'asr' }));
+    return r;
+  })();
+  infoCache.set(id, { p, at: Date.now() }); capMap(infoCache, 40);
+  p.catch(() => infoCache.delete(id));
+  return p;
+}
+const resolveKey = (id, q, c, perf, safe) => JSON.stringify([id, q, c.codec, c.fps, c.maxBitrate, c.audioLang, c.audioCodec, c.maxVideoBitrate, c.maxAudioBitrate, c.dataSaverRes, c.powerRes, !!perf.data, !!perf.power, !!safe]);
+function resolveVideo(id, quality, perf, safe) {
+  const c = cfg(), q = quality || c.quality || 'auto';
+  perf = { data: !!perf?.data, power: !!perf?.power };
+  const key = resolveKey(id, q, c, perf, safe), hit = resolveCache.get(key);
+  if (hit && Date.now() - hit.at < 25 * 60 * 1000) return hit.p;
+  const args = ['-g', '-f', streamFormat(q, c, perf), ...(safe || perf.data || perf.power ? [] : sortArgs(c)), '--no-playlist', `https://www.youtube.com/watch?v=${id}`];
+  // Skipping yt-dlp's HLS lookup saves most of a second; the plain https formats are the ones used anyway. Live streams and the
+  // odd video that only has HLS fail that way, so those are asked again the full way.
+  const p = ytdlp(['--extractor-args', 'youtube:skip=hls', ...args]).catch(() => ytdlp(args)).then((out) => { const lines = out.trim().split('\n').filter(Boolean); if (!lines.length) throw new Error('No playable stream found.'); return { lines }; });
+  resolveCache.set(key, { p, at: Date.now() }); capMap(resolveCache, 24);
+  p.catch(() => resolveCache.delete(key));
+  return p;
+}
+
+// Two lookups run at a time; the rest wait their turn (a video the pointer is resting on goes to the front).
+const prefetchQ = [];
+function pumpPrefetch() {
+  while (prefetching < 2 && prefetchQ.length) {
+    const { id, perf } = prefetchQ.shift(); prefetching++;
+    const c = cfg(), force = !!(c.stableAudio && c.stableAudio !== 'off');
+    const streamP = resolveVideo(id, undefined, perf).then((r) => (c.bufferProxy === false && !force ? null : warmStreams(r, force)));
+    Promise.allSettled([videoInfo(id), streamP]).finally(() => { prefetching--; pumpPrefetch(); });
+  }
+}
 const handlers = {
   async 'yt:home'(seeds) {
     // Signed in: your real recommendations from the TV home page.
@@ -541,37 +764,13 @@ const handlers = {
     const i = await innertube();
     return i.getSearchSuggestions(q);
   },
-  async 'yt:video'(id) {
+  async 'yt:video'(id) { checkId(id); return videoInfo(id); },
+  // Starts resolving a video's stream and details ahead of time (hovering a video, the next one in line), so opening it is quick.
+  'yt:prefetch'(id, perf, urgent) {
     checkId(id);
-    const i = await innertube();
-    const info = await i.getInfo(id);
-    const b = info.basic_info;
-    const related = collectVideos(info.watch_next_feed || []);
-    return {
-      id, title: b.title, channel: b.author, channelId: b.channel_id,
-      views: b.view_count, likes: b.like_count, description: b.short_description,
-      duration: b.duration, keywords: b.keywords || [], isLive: b.is_live,
-      published: txt(info.primary_info?.published) || '',
-      relative: txt(info.primary_info?.relative_date) || '',
-      channelThumb: thumb(info.secondary_info?.owner?.author?.thumbnails) || '',
-      subs: txt(info.secondary_info?.owner?.subscriber_count) || '',
-      related,
-      loudnessDb: (() => { const v = info.page?.[0]?.player_config?.audio_config?.loudness_db; return typeof v === 'number' ? v : null; })(),
-      storyboard: (() => {
-        try {
-          const bs = (info.storyboards?.boards || []).filter((b) => b.template_url && b.thumbnail_width >= 80 && b.thumbnail_count > 0);
-          const b = bs.find((x) => x.thumbnail_width === 160) || bs[bs.length - 1]; if (!b) return null;
-          return { url: b.template_url, w: b.thumbnail_width, h: b.thumbnail_height, cols: b.columns, rows: b.rows, count: b.thumbnail_count, interval: b.interval };
-        } catch { return null; }
-      })(),
-      chapters: (() => {
-        try {
-          const mm = info.player_overlays?.decorated_player_bar?.player_bar?.markers_map;
-          const ch = mm?.find((m) => m.marker_key === 'DESCRIPTION_CHAPTERS')?.value?.chapters || [];
-          return ch.map((c) => ({ t: (c.time_range_start_millis || 0) / 1000, title: c.title?.text || String(c.title || ''), thumb: fixUrl((c.thumbnail || [])[0]?.url || '') })).filter((c) => c.title);
-        } catch { return []; }
-      })(),
-    };
+    if (!prefetchQ.some((j) => j.id === id)) { (urgent ? prefetchQ.unshift(...[{ id, perf }]) : prefetchQ.push({ id, perf })); while (prefetchQ.length > 6) prefetchQ.pop(); }
+    pumpPrefetch();
+    return true;
   },
   // ----- comments: pages, replies, and (signed in) reply / like -----
   async 'yt:comments'(id, sort, cont) {
@@ -687,10 +886,12 @@ const handlers = {
     const c = cfg();
     const q = quality || c.quality || 'auto';
     perf = { data: !!perf?.data, power: !!perf?.power }; perfNow = perf;
-    const lines = (await ytdlp(['-g', '-f', streamFormat(q, c, perf), ...(safe || perf.data || perf.power ? [] : sortArgs(c)), '--no-playlist', `https://www.youtube.com/watch?v=${id}`])).trim().split('\n');
-    const px = (u) => proxied(u, forceProxy || (c.stableAudio && c.stableAudio !== 'off'));
-    if (q === 'audio') return { video: null, audio: await px(lines[0]) };
-    return lines.length > 1 ? { video: await px(lines[0]), audio: await px(lines[1]) } : { video: await px(lines[0]), audio: null };
+    retireStreams(); // the video before this one stops downloading ahead
+    const r = await resolveVideo(id, q, perf, safe), lines = r.lines;
+    const force = forceProxy || (c.stableAudio && c.stableAudio !== 'off');
+    const px = async (u, i) => (r.warm && takeWarm(r.warm[i])) || proxied(u, force);
+    if (q === 'audio') return { video: null, audio: await px(lines[0], 0) };
+    return lines.length > 1 ? { video: await px(lines[0], 0), audio: await px(lines[1], 1) } : { video: await px(lines[0], 0), audio: null };
   },
   'yt:download'(id, kind, opts) {
     checkId(id);
@@ -812,6 +1013,8 @@ const handlers = {
   },
   async 'yt:subs-list'(id) {
     checkId(id);
+    try { return (await videoInfo(id)).captionTracks || []; } catch {}
+    // (fallback) ask yt-dlp
     const d = JSON.parse(await ytdlp(['-J', '--skip-download', '--no-playlist', `https://www.youtube.com/watch?v=${id}`]));
     const manual = Object.keys(d.subtitles || {}).filter((k) => k !== 'live_chat').map((k) => ({ lang: k, name: d.subtitles[k]?.[0]?.name || k, auto: false }));
     const autoKeys = Object.keys(d.automatic_captions || {});
@@ -821,6 +1024,16 @@ const handlers = {
   },
   async 'yt:subs-get'(id, lang, auto) {
     checkId(id); checkLang(lang);
+    // Straight from YouTube's caption address (no yt-dlp run); yt-dlp stays as the fallback.
+    try {
+      await videoInfo(id);
+      const t = (captionUrls.get(id) || []).find((x) => x.lang === lang && x.auto === !!auto);
+      if (t) {
+        const r = await fetch(t.url + (t.url.includes('?') ? '&' : '?') + 'fmt=vtt', { headers: { 'User-Agent': PROXY_UA } });
+        const txt = r.ok ? await r.text() : '';
+        if (txt.startsWith('WEBVTT')) return txt;
+      }
+    } catch {}
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytd-subs-'));
     try {
       await ytdlp(['--skip-download', auto ? '--write-auto-subs' : '--write-subs', '--sub-langs', lang, '--sub-format', 'vtt', '--no-playlist', '-o', path.join(dir, '%(id)s.%(ext)s'), `https://www.youtube.com/watch?v=${id}`]);
@@ -846,8 +1059,8 @@ const handlers = {
   // Diagnostics: how much each active stream has downloaded ahead in the local cache.
   'dev:streamStats'() {
     return [...streamsMap.values()].map((s) => {
-      const keys = [...s.chunks.keys()].sort((a, b) => a - b), bps = s.dur ? s.size / s.dur : 0;
-      return { kind: s.mime.split('/')[0], mb: +(s.size / 1048576).toFixed(1), seconds: s.dur, cachedChunks: keys.length, cachedSecondsApprox: bps ? Math.round((keys.length * CHUNK) / bps) : null, cachedMB: +(keys.length * CHUNK / 1048576).toFixed(1) };
+      const done = [...s.chunks.entries()].filter(([, e]) => e.done).length, bps = s.dur ? s.size / s.dur : 0;
+      return { kind: s.mime.split('/')[0], mb: +(s.size / 1048576).toFixed(1), seconds: s.dur, cachedChunks: done, queued: s.chunks.size - done, disk: !!s.disk, cachedSecondsApprox: bps ? Math.round((done * CHUNK) / bps) : null, cachedMB: +((done * CHUNK) / 1048576).toFixed(1) };
     });
   },
   'app:quit'() { quitting = true; app.quit(); return true; },
@@ -1082,6 +1295,9 @@ app.whenReady().then(() => {
   // Nothing in the app needs camera, microphone, location and so on: refuse every permission except full screen.
   require('electron').session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'fullscreen'));
   scheduleUpdateChecks();
+  sweepOldCaches();
+  innertube().catch(() => {}); // set the web session up in the background so the first page does not wait for it
+  setTimeout(() => execFile(YTDLP, ['--version'], () => {}), 1500); // read yt-dlp from disk once, so the first video starts sooner
   createWindow();
   if (HIDDEN) return;
   createTray();
@@ -1097,7 +1313,7 @@ ipcMain.on('mini-cmd', (_e, c) => send(c));
 ipcMain.on('mini-state', (_e, s) => mini?.webContents.send('mini-state', s));
 ipcMain.on('player-state', (_e, s) => { playerPlaying = !!s.playing; mini?.webContents.send('mini-state', s); });
 app.on('before-quit', () => { quitting = true; });
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => { globalShortcut.unregisterAll(); try { fs.rmSync(CACHE_ROOT, { recursive: true, force: true }); fs.rmdirSync(CACHE_PARENT); } catch {} });
 // Closing the last window really quits (the "keep running in the tray" option hides the window instead, so it never gets here).
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') { quitting = true; app.quit(); } });
 // Only one copy runs: opening the app again brings the existing window forward instead of starting another.

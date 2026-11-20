@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('api', {
   copy: (t) => call('app:copy', t),
   historyStart: (id) => call('me:historyStart', id),
   historyTime: (id, t) => call('me:historyTime', id, t),
+  prefetch: (id, perf, urgent) => call('yt:prefetch', id, perf, urgent),
   notify: (kind, title, body, vid) => call('app:notify', kind, title, body, vid),
   onOpenVideo: (cb) => ipcRenderer.on('open-video', (_e, v) => cb(v)),
   updateCheck: () => call('update:check'),

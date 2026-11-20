@@ -12,7 +12,7 @@ const SCHEMA = {
     startPage: 'home', logoGoes: 'home', chaptersPlace: 'side', sidePanel: true, relatedChips: true, tabsBar: true, classicMode: 'auto', notifyOn: true, notifyWhen: 'background', notifySound: true, notifyUploadsOn: true, notifyUploadMode: 'bell', notifyInterval: 30, notifySleep: true, notifyQueue: true, notifyUpdate: true, notifyPlaying: false, autoUpdateCheck: true, playerTheme: 'modern', playerAccentOn: false, playerAccent: '#ff3b3b', pbSide: 'right', pbAutoplay: true, seekPreview: true, stableAudio: 'levels', stableBoost: true, stableCompress: 'strong', dimWatched: true, pageAnim: 'slide', swipeNav: true, swipeDistance: 150, swipeInvert: false, hideShorts: true, closeToTray: false, windowSystem: 'auto',
     commentsPlace: 'below', commentsSideHeight: 75, commentsAuto: true, commentsSortDefault: 'TOP_COMMENTS', commentsSize: 100, commentsDensity: 'comfortable', commentsLines: '5', commentsAvatars: true, commentsLikes: true, commentsBadges: true, commentsActions: true, commentsBlock: '', commentsHideLinks: false, composerStyle: 'expand', composerSubmit: 'ctrl', composerConfirm: true, composerDrafts: true, composerCounter: true, afterPost: 'newest',
     autoplayMode: 'endless', dataSaver: false, powerSaver: false, powerAuto: 'off', dataSaverRes: '480', powerRes: '720', touchMode: 'auto', watchedAt: '50', syncHistory: true, endScreen: true, endGrid: '3x1', autoplayDelay: '8', rememberVolume: true, searchView: 'list', resume: true, rememberSpeed: true, defaultSpeed: '1', defaultVolume: 100, sleepFade: '0', sleepAction: 'pause',
-    quality: 'auto', maxBitrate: true, audioLang: 'original', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '60',
+    quality: 'auto', maxBitrate: true, audioLang: 'original', fps: '0', codec: 'auto', maxVideoBitrate: '0', audioCodec: 'auto', maxAudioBitrate: '0', bufferProxy: true, bufferSeconds: '180', bufferMaxMB: '1024', prefetchNext: true, bellOn: true, floatPlayer: true, floatSize: 'medium', floatCorner: 'br',
     dlContainer: 'mp4', dlMaxHeight: '1080', dlCodec: 'auto', dlFps: '0', dlAudioFormat: 'mp3', dlAudioQuality: '0',
     dlEmbedMeta: true, dlEmbedThumb: true, dlEmbedSubs: false, dlSubLangs: 'en.*,en', dlSponsorRemove: false,
     dlTemplate: '%(title)s [%(id)s].%(ext)s', dlRateLimit: '', dlFragments: '4', dlPlaylistFolders: true, dlNotify: true,
@@ -74,9 +74,10 @@ const SCHEMA = {
         { key: 'maxBitrate', type: 'toggle', label: 'Always pick the highest-bitrate stream', hint: 'At the chosen resolution, take the format with the most video and audio data (playback and downloads). Turn off to let yt-dlp prefer newer, smaller codecs.' },
         { key: 'maxVideoBitrate', type: 'select', label: 'Video bitrate limit', options: opt(['0', 'No limit'], ['1000', '1 Mbps'], ['2500', '2.5 Mbps'], ['5000', '5 Mbps'], ['8000', '8 Mbps'], ['15000', '15 Mbps']) },
       ] },
-      { title: 'Buffering', hint: 'Streams go through a small local cache that downloads ahead in steady chunks. This smooths out stutters from slow or throttled connections.', items: [
+      { title: 'Buffering', hint: 'Streams go through a local cache that downloads ahead in steady chunks, so slow or throttled connections do not stutter. A big buffer is kept on disk (in your cache folder) and removed when you quit.', items: [
         { key: 'bufferProxy', type: 'toggle', label: 'Buffer ahead through the local cache' },
-        { key: 'bufferSeconds', type: 'select', label: 'Buffer ahead', options: opt(['15', '15 seconds'], ['30', '30 seconds'], ['60', '1 minute'], ['120', '2 minutes'], ['300', '5 minutes']), when: (s) => s.bufferProxy !== false, hint: 'More buffer uses more memory (a few hundred MB for 4K at 5 minutes). Applies to the next video.' },
+        { key: 'bufferSeconds', type: 'select', label: 'Buffer ahead', options: opt(['15', '15 seconds'], ['30', '30 seconds'], ['60', '1 minute'], ['120', '2 minutes'], ['180', '3 minutes'], ['300', '5 minutes'], ['600', '10 minutes'], ['1200', '20 minutes'], ['1800', '30 minutes']), when: (s) => s.bufferProxy !== false, hint: 'More buffer uses more memory (a few hundred MB for 4K at 5 minutes). Applies to the next video.' },
+        { key: 'bufferMaxMB', type: 'select', label: 'Most the buffer may hold', options: opt(['256', '256 MB'], ['512', '512 MB'], ['1024', '1 GB'], ['2048', '2 GB'], ['4096', '4 GB']), hint: 'Big buffers are kept in a temporary folder on disk (emptied when you quit), so memory stays low. A few minutes of 4K is about a gigabyte.', when: (s) => s.bufferProxy !== false },
       ] },
       { title: 'Audio', items: [
         { key: 'audioCodec', type: 'select', label: 'Audio codec', options: opt(['auto', 'Automatic'], ['aac', 'AAC'], ['opus', 'Opus']) },
@@ -189,6 +190,9 @@ const SCHEMA = {
       ] },
       { title: 'Watch page', items: [
         { key: 'theater', type: 'toggle', label: 'Theater mode (wide player)' },
+        { key: 'floatPlayer', type: 'toggle', label: 'Keep the video playing in a corner while I browse', hint: 'Going to the home page, a channel, a playlist or subscriptions keeps the video going in a small player you can close or click to go back to.' },
+        { key: 'floatSize', type: 'select', label: 'Floating player size', options: opt(['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']), when: (s) => s.floatPlayer !== false },
+        { key: 'floatCorner', type: 'select', label: 'Floating player corner', options: opt(['br', 'Bottom right'], ['bl', 'Bottom left'], ['tr', 'Top right'], ['tl', 'Top left']), when: (s) => s.floatPlayer !== false },
         { key: 'sidePanel', type: 'toggle', label: 'Show the "In this video" panel (chapters and transcript) beside the video' },
         { key: 'chaptersPlace', type: 'select', label: 'Chapters go', options: opt(['side', 'In the side panel, above the suggested videos'], ['below', 'Below the video, in the description area']) },
         { key: 'relatedChips', type: 'toggle', label: 'Filter chips above the suggested videos' },
@@ -253,6 +257,7 @@ const SCHEMA = {
       { title: 'Saving modes', items: [
         { key: 'dataSaver', type: 'toggle', label: 'Data saver', hint: 'Smaller video, a short buffer, and no extras that fetch more: DeArrow, dislike counts, seek-bar previews, new-video checks, and comments until you ask for them.' },
         { key: 'powerSaver', type: 'toggle', label: 'Power saving (low-end mode)', hint: 'For tablets and older devices: no animations or blur, H.264 video at a lower size (most devices decode it in hardware), no audio processing, slower timers and a smaller memory buffer.' },
+        { key: 'prefetchNext', type: 'toggle', label: 'Get videos ready before you open them', hint: 'Looks a video up when you rest the pointer on it and the next one while the current one plays, so it starts sooner. Off in data saver and power saving.' },
         { key: 'powerAuto', type: 'select', label: 'Turn power saving on by itself', options: opt(['off', 'Never'], ['battery', 'Whenever the device runs on battery'], ['low', 'When on battery and 20% or less is left']) },
       ] },
       { title: 'Limits while a mode is on', items: [
@@ -265,6 +270,7 @@ const SCHEMA = {
     ] },
     { id: 'notifications', label: 'Notifications', groups: [
       { title: 'Desktop notifications', items: [
+        { key: 'bellOn', type: 'toggle', label: 'Show the notification bell in the header', hint: 'Keeps a list of new videos, finished downloads and updates, even when desktop pop-ups are off.' },
         { key: 'notifyOn', type: 'toggle', label: 'Show desktop notifications' },
         { key: 'notifyWhen', type: 'select', label: 'Show them', options: opt(['background', 'Only when the app is minimized, hidden or in the background'], ['always', 'Always']), when: (s) => s.notifyOn },
         { key: 'notifySound', type: 'toggle', label: 'Play the system notification sound', when: (s) => s.notifyOn },
