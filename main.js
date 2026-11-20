@@ -9,6 +9,14 @@ const { spawn, execFile } = require('child_process');
 let win, mini, tray, yt, lockLost = false;
 // Test mode: nothing may appear on the user's screen (windows, tray, shortcuts, notifications, menus, browser).
 const HIDDEN = !!process.env.YT_TEST_HIDDEN;
+// Developer log: what the app did and what went wrong, kept in memory (the last 1,000 lines) and shown in the hidden Developer settings.
+const logRing = []; let devVerbose = false;
+const fmtLog = (a) => a.map((x) => (x instanceof Error ? x.stack || x.message : typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })())).join(' ');
+const scrub = (t) => t.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]').replace(/([?&](?:ip|key|sig|signature|token|access_token|authorization)=)[^&\s"]+/gi, '$1…').slice(0, 400) + (t.length > 400 ? ' …' : '');
+function dlog(level, ...a) { logRing.push({ t: Date.now(), level, src: 'main', msg: scrub(fmtLog(a)) }); if (logRing.length > 1000) logRing.shift(); }
+for (const k of ['log', 'info', 'warn', 'error']) { const o = console[k].bind(console); console[k] = (...a) => { dlog(k === 'log' ? 'info' : k, ...a); o(...a); }; }
+process.on('uncaughtExceptionMonitor', (e) => dlog('error', 'uncaught exception:', e));
+process.on('unhandledRejection', (e) => dlog('error', 'unhandled rejection:', e));
 const showWin = (w) => { if (!HIDDEN && w && !w.isDestroyed()) w.show(); };
 const jobs = new Map();
 let playerPlaying = false;
@@ -1079,6 +1087,9 @@ const handlers = {
     if (HIDDEN) return; if (/^https:\/\//.test(url)) shell.openExternal(url); },
   'app:mini'(on) { toggleMini(on); },
   // Diagnostics: how much each active stream has downloaded ahead in the local cache.
+  'dev:log'(since) { return logRing.filter((l) => l.t > (+since || 0)); },
+  'dev:logClear'() { logRing.length = 0; return true; },
+  'dev:verbose'(on) { devVerbose = !!on; dlog('info', 'verbose logging ' + (devVerbose ? 'on' : 'off')); return true; },
   'dev:streamStats'() {
     return [...streamsMap.values()].map((s) => {
       const done = [...s.chunks.entries()].filter(([, e]) => e.done).length, bps = s.dur ? s.size / s.dur : 0;
@@ -1225,8 +1236,9 @@ function scheduleUpdateChecks() {
 
 for (const [name, fn] of Object.entries(handlers)) {
   ipcMain.handle(name, async (_e, ...args) => {
-    try { return { ok: true, data: await fn(...args) }; }
-    catch (err) { return { ok: false, error: String(err.message || err) }; }
+    const t0 = Date.now();
+    try { const data = await fn(...args); if (devVerbose && !name.startsWith('dev:')) dlog('debug', `${name} ok in ${Date.now() - t0} ms`); return { ok: true, data }; }
+    catch (err) { dlog('warn', `${name} failed after ${Date.now() - t0} ms: ${err.message || err}`); return { ok: false, error: String(err.message || err) }; }
   });
 }
 

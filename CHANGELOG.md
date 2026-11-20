@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.3
+
+- New Settings, About tab (version and a short description). Press and hold the app name there for five seconds, like tapping the build number on Android, to unlock hidden developer options. A Developer tab appears.
+- Developer tab: a live log of what the app and the page are doing (the last 1,000 lines each). It records errors, failed requests with how long they took, unhandled exceptions, and the sound and stream problems the player recovers from. Filter it to warnings or errors, copy it, or clear it. "Verbose logging" also records every request and the player's buffering, seeking and stream events. IP addresses and tokens are removed from the log and long dumps are cut short, so it is safe to paste. "Turn developer options off" hides the tab again.
+
 ## 0.11.2
 
 - "In this video" panel: it now starts collapsed, showing only its header and the Chapters / Transcript tabs (Transcript appears whenever the video has captions, even if captions are not shown). Click a tab to open it. The X closes the panel and it stays gone for other videos until you restart the app.

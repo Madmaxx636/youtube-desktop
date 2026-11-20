@@ -23,7 +23,7 @@ const SCHEMA = {
     watchRelated: 'side', theater: false, commentsHidden: false, descExpanded: false, showDislikes: true,
     subsView: 'grouped', subsGroupBy: 'date', subsHideWatched: true, subsSort: 'new', subsLayout: 'list',
     sponsorblock: true, sbc_sponsor: true, sbc_selfpromo: true, sbc_interaction: true, sbc_intro: true, sbc_outro: true, sbc_preview: false, sbc_music_offtopic: false, sbc_filler: false,
-    dearrow: true, ryd: true, pauseHistory: false,
+    dearrow: true, ryd: true, pauseHistory: false, devMode: false, devVerbose: false,
   },
   tabs: [
     { id: 'general', label: 'General', groups: [
@@ -305,6 +305,20 @@ const SCHEMA = {
         { key: 'syncHistory', type: 'toggle', label: 'Add what I watch here to my YouTube history (signed in)', hint: 'Sends YouTube the usual playback report so videos show in your history on the web. Off while "Pause watch history" is on.' },
         { type: 'button', label: 'Clear watch history and progress', action: 'clearHistory', danger: true },
         { type: 'button', label: 'Clear local subscriptions', action: 'clearSubs', danger: true },
+      ] },
+    ] },
+    { id: 'about', label: 'About', groups: [
+      { title: 'YouTube Desktop', items: [{ type: 'about' }] },
+    ] },
+    { id: 'dev', label: 'Developer', hidden: (s) => !s.devMode, groups: [
+      { title: 'Log', items: [
+        { key: 'devVerbose', type: 'toggle', label: 'Verbose logging', hint: 'Also records every request the app makes to its own backend and the player\'s buffering, seeking and stream events.' },
+        { type: 'logview' },
+        { type: 'button', label: 'Copy the log', action: 'copyDevLog' },
+        { type: 'button', label: 'Clear the log', action: 'clearDevLog' },
+      ] },
+      { title: 'Developer options', items: [
+        { type: 'button', label: 'Turn developer options off and hide this tab', action: 'devOff', danger: true },
       ] },
     ] },
   ],

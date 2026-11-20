@@ -1,3 +1,14 @@
+// ---------- developer log (shown in the hidden Developer settings) ----------
+const devBuf = [];
+const scrub = (t) => t.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]').replace(/([?&](?:ip|key|sig|signature|token|access_token|authorization)=)[^&\s"]+/gi, '$1…').slice(0, 400) + (t.length > 400 ? ' …' : '');
+function dlog(level, ...a) {
+  const msg = a.map((x) => (x instanceof Error ? x.stack || x.message : typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })())).join(' ');
+  // (the log can be copied and shared: no addresses, and long dumps are cut short)
+  devBuf.push({ t: Date.now(), level, src: 'page', msg: scrub(msg) }); if (devBuf.length > 1000) devBuf.shift();
+}
+for (const k of ['log', 'info', 'warn', 'error']) { const o = console[k].bind(console); console[k] = (...a) => { dlog(k === 'log' ? 'info' : k, ...a); o(...a); }; }
+window.addEventListener('error', (e) => dlog('error', 'error:', e.message, (e.filename || '').split('/').pop() + ':' + e.lineno));
+window.addEventListener('unhandledrejection', (e) => dlog('error', 'unhandled rejection:', e.reason));
 const $ = (s) => document.querySelector(s);
 const grid = $('#grid'), status = $('#status'), video = $('#video');
 const perf = { data: false, power: false, battery: null, ready: false };
@@ -95,7 +106,8 @@ function cueStyle() {
   return `font-size:${settings.subSize}%;font-family:${CUE_FONTS[settings.subFont] || CUE_FONTS.sans};color:${settings.subColor};background-color:${rgba(settings.subBg, settings.subBgOpacity / 100)};text-shadow:${CUE_EDGES[settings.subEdge] || 'none'}`;
 }
 function applyCueStyle() { $('#cue-css').textContent = `video::cue{${cueStyle()}}`; }
-function applySettings() {
+let lastVerbose = false;
+function applySettings() { if (!!settings.devVerbose !== lastVerbose) { lastVerbose = !!settings.devVerbose; api.devVerbose(lastVerbose).catch(() => {}); }
   applyTheme(); applyLayout(); applyCueStyle();
   $('#custom-css').textContent = settings.css || '';
   renderToolbar(); renderSideSubs();
@@ -126,6 +138,9 @@ const ACTIONS = {
     await save({ ...D, toolbar: null, toolbarHidden: false, speed: 1, downloadDir: '' });
   },
   resetToolbar: () => save({ toolbar: null, toolbarHidden: false, menuActions: null }),
+  copyDevLog() { const t = $('#dev-log')?.innerText; api.copy(t || ''); toast('Log copied'); },
+  async clearDevLog() { devBuf.length = 0; mainLogT = 0; await api.devLogClear(); paintLogView(true); },
+  async devOff() { await save({ devMode: false, devVerbose: false }); sTab = 'about'; renderSettings(); toast('Developer options off'); },
   copyMediaLog() { api.copy(mlogBuf.length ? mlogBuf.join('\n') : 'Nothing has gone wrong with the sound or the stream since the app started.'); toast('Playback log copied'); },
   async testNotify() { const ok = await api.notify('test', 'YouTube Desktop', 'This is how a notification looks.'); if (!ok) toast('Notifications are switched off.'); },
   async checkUpdate() { toast('Checking for updates…'); const u = await api.updateCheck(); if (u.status === 'none') toast(`You have the latest version (${u.current}).`); else if (u.status === 'error') toast('Could not check: ' + u.error); },
@@ -177,18 +192,54 @@ function settingRow(it) {
     case 'button': row.innerHTML = `<span class="lab"></span><button class="${it.danger ? 'danger' : ''}">${esc(it.label)}</button>`; row.querySelector('button').onclick = () => ACTIONS[it.action](); break;
     case 'file': row.innerHTML = `${lab}<input type="file" accept="${esc(it.accept || '')}">`; row.querySelector('input').onchange = async (e) => { const f = e.target.files[0]; if (f) await ACTIONS[it.action](f); e.target.value = ''; }; break;
     case 'info': row.className = 'sinfo'; row.textContent = it.text; break;
+    case 'about': {
+      row.className = 'about-row';
+      row.innerHTML = `<div class="ab-name">YouTube Desktop</div><div class="ab-ver">Version …</div><div class="ab-note">A desktop client for YouTube.</div>`;
+      api.updateState().then((u) => { row.querySelector('.ab-ver').textContent = 'Version ' + (u.current || ''); }).catch(() => {});
+      // Like Android's build number: press and hold the name for five seconds to unlock the developer options.
+      let tm = 0; const nm = row.querySelector('.ab-name'), stop = () => { clearTimeout(tm); nm.classList.remove('holding'); };
+      nm.addEventListener('pointerdown', () => {
+        if (settings.devMode) { toast('Developer options are already on'); return; }
+        nm.classList.add('holding'); clearTimeout(tm);
+        tm = setTimeout(() => { nm.classList.remove('holding'); save({ devMode: true }).then(() => { toast('Developer options unlocked'); sTab = 'dev'; renderSettings(); }); }, 5000);
+      });
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) nm.addEventListener(ev, stop);
+      break;
+    }
+    case 'logview': row.className = 'logview'; row.innerHTML = `<div class="lv-bar"><select id="lv-level"><option value="all">Everything</option><option value="warn">Warnings and errors</option><option value="error">Errors only</option></select><span id="lv-count"></span></div><div id="dev-log" tabindex="0"></div>`; queueMicrotask(startLogView); break;
     case 'updatepanel': row.className = 'upd-panel'; row.id = 'upd-panel'; queueMicrotask(() => paintUpdatePanel(lastUpd)); break;
     case 'subpreview': row.className = 'cue-preview'; row.innerHTML = '<span>This is how subtitles will look.</span>'; break;
   }
   return row;
 }
 function updateCuePreview() { const p = $('.cue-preview span'); if (p) p.style.cssText = cueStyle(); }
+let mainLog = [], mainLogT = 0, lvTimer = 0;
+const lvLevels = { debug: 0, info: 0, warn: 1, error: 2 };
+function paintLogView(force) {
+  const el = $('#dev-log'); if (!el) { clearInterval(lvTimer); lvTimer = 0; return; }
+  const min = { all: 0, warn: 1, error: 2 }[$('#lv-level')?.value || 'all'];
+  const all = [...mainLog, ...devBuf].filter((l) => (lvLevels[l.level] ?? 0) >= min).sort((a, b) => a.t - b.t).slice(-600);
+  const key = all.length + ':' + (all[all.length - 1]?.t || 0) + ':' + min;
+  if (!force && el.dataset.key === key) return;
+  el.dataset.key = key;
+  const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  el.innerHTML = all.length ? all.map((l) => `<div class="lg ${esc(l.level)}"><span class="lt">${new Date(l.t).toTimeString().slice(0, 8)}</span><span class="ls">${l.src}</span>${esc(l.msg)}</div>`).join('') : '<div class="lg info">Nothing logged yet.</div>';
+  if (stick) el.scrollTop = el.scrollHeight;
+  const c = $('#lv-count'); if (c) c.textContent = all.length + ' lines';
+}
+function startLogView() {
+  clearInterval(lvTimer);
+  const poll = async () => { if (!$('#dev-log')) { clearInterval(lvTimer); lvTimer = 0; return; } try { const l = await api.devLog(mainLogT); if (l.length) { mainLog.push(...l); mainLogT = l[l.length - 1].t; if (mainLog.length > 1000) mainLog.splice(0, mainLog.length - 1000); } } catch {} paintLogView(); };
+  $('#lv-level').onchange = () => paintLogView(true);
+  poll(); lvTimer = setInterval(poll, 1000);
+  const el = $('#dev-log'); el.scrollTop = el.scrollHeight;
+}
 function renderSettings(keepScroll) {
   const nav = $('#s-tabs'), pane = $('#s-pane'), top = pane.scrollTop;
   nav.innerHTML = '';
-  for (const t of SCHEMA.tabs) { const a = document.createElement('a'); a.textContent = t.label; a.className = t.id === sTab ? 'on' : ''; a.onclick = () => { sTab = t.id; renderSettings(); pane.scrollTop = 0; }; nav.appendChild(a); }
+  for (const t of SCHEMA.tabs) { if (t.hidden && t.hidden(settings)) continue; const a = document.createElement('a'); a.textContent = t.label; a.className = t.id === sTab ? 'on' : ''; a.onclick = () => { sTab = t.id; renderSettings(); pane.scrollTop = 0; }; nav.appendChild(a); }
   pane.innerHTML = '';
-  const tab = SCHEMA.tabs.find((t) => t.id === sTab) || SCHEMA.tabs[0];
+  const tab = SCHEMA.tabs.find((t) => t.id === sTab && !(t.hidden && t.hidden(settings))) || SCHEMA.tabs[0];
   for (const g of tab.groups) {
     const box = document.createElement('div'); box.className = 'sg';
     box.innerHTML = `<h3>${esc(g.title)}</h3>${g.hint ? `<p class="ghint">${esc(g.hint)}</p>` : ''}`;
@@ -1226,7 +1277,7 @@ let audio = newAudio(), audioUrl = '';
 let audioActive = false, audioGo = false, audioArm = null, loadSeq = 0, lastHardSeek = 0;
 // A short record of anything that went wrong with the sound or the stream (Settings, Video & audio, "Copy the playback log").
 const mlogBuf = [];
-function mlog(...a) { mlogBuf.push(new Date().toTimeString().slice(0, 8) + ' ' + a.join(' ')); if (mlogBuf.length > 80) mlogBuf.shift(); }
+function mlog(...a) { dlog('warn', 'playback:', ...a); mlogBuf.push(new Date().toTimeString().slice(0, 8) + ' ' + a.join(' ')); if (mlogBuf.length > 80) mlogBuf.shift(); }
 // The stream itself dropped (an address that expired, the cache entry gone, a network error): look the video up again and carry on from the
 // same spot. A few tries, then give up rather than loop.
 const reconnects = { n: 0, t: 0 };
@@ -2786,3 +2837,8 @@ document.addEventListener('keydown', (e) => {
   const start = { subs: () => document.querySelector('#side [data-nav=subs]').click(), playlists: () => document.querySelector('#side [data-nav=playlists]').click(), history: () => document.querySelector('#side [data-nav=history]').click() }[settings.startPage];
   (start || goHome)();
 })();
+
+// Verbose logging: the player's own events, to find out why something stalled, skipped or went quiet.
+for (const ev of ['waiting', 'stalled', 'seeking', 'seeked', 'error', 'playing', 'pause', 'ended', 'ratechange', 'emptied', 'loadedmetadata']) video.addEventListener(ev, () => {
+  if (settings.devVerbose || ev === 'error') dlog(ev === 'error' ? 'warn' : 'debug', 'video', ev, 't=' + (video.currentTime || 0).toFixed(1), 'ready=' + video.readyState, video.error ? 'code=' + video.error.code : '');
+});

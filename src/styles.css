@@ -972,3 +972,20 @@ body.touch{--mini-gap:20px}
 .np-empty{padding:28px 18px;color:var(--fg2);font-size:13px;text-align:center;line-height:1.5}
 body.touch #notif-panel{top:72px}
 body.touch .np-row{padding:14px}
+
+/* about + hidden developer log */
+.about-row{padding:8px 0}
+.ab-name{font-size:20px;font-weight:500;display:inline-block;user-select:none;-webkit-user-select:none;padding:2px 0}
+.ab-name.holding{opacity:.6}
+.ab-ver{color:var(--fg2);margin-top:2px}
+.ab-note{color:var(--fg2);font-size:12px;margin-top:8px}
+.logview{display:block;padding:6px 0}
+.lv-bar{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.lv-bar #lv-count{color:var(--fg2);font-size:12px}
+#dev-log{height:46vh;overflow:auto;background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;user-select:text;-webkit-user-select:text}
+#dev-log .lg{white-space:pre-wrap;word-break:break-word}
+#dev-log .lt{color:var(--fg2);margin-right:8px}
+#dev-log .ls{display:inline-block;min-width:34px;margin-right:8px;color:var(--fg2)}
+#dev-log .lg.warn{color:#e0a030}
+#dev-log .lg.error{color:#e05555}
+#dev-log .lg.debug{color:var(--fg2)}
