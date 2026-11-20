@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   relaunch: () => call('app:relaunch'),
   quit: () => call('app:quit'),
   streamStats: () => call('dev:streamStats'),
+  playerCheck: (id, o) => call('dev:playerCheck', id, o),
   devLog: (since) => call('dev:log', since),
   devLogClear: () => call('dev:logClear'),
   devVerbose: (on) => call('dev:verbose', on),

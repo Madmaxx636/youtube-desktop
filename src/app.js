@@ -2387,7 +2387,7 @@ api.onUpdate(paintUpdate);
 api.updateState().then(paintUpdate).catch(() => {});
 
 // ---------- side panel: chapters and transcript ("In this video"), like YouTube ----------
-const chaptersSide = () => settings.chaptersPlace !== 'below' && settings.watchRelated !== 'hidden';
+const chaptersSide = () => settings.sidePanel !== false; // chapters and transcript always live in the side panel (the "below the video" strip is only used when the panel is turned off)
 let chapTr = new Set(), rcTab = 'chapters', rcOpen = false, rcDismissed = false, allCapTracks = [], chapLoop = null, transcript = null, trIdx = -1;
 const vUrl = (t) => `https://www.youtube.com/watch?v=${current?.id}${t != null ? '&t=' + Math.floor(t) : ''}`;
 function setChapters(list) {
@@ -2410,11 +2410,11 @@ function parseVttCues(vtt) {
   return cues;
 }
 async function loadTranscript() {
-  if (!current || !capTracks.length) return;
+  if (!current || !allCapTracks.length) return;
   if (transcript?.id === current.id) return;
   const id = current.id; transcript = { id, cues: null }; paintRc();
   const want = (settings.subLang || '').toLowerCase();
-  const pick = capLang || (() => { const t = capTracks.find((x) => x.lang.toLowerCase() === want) || capTracks.find((x) => x.lang.toLowerCase().startsWith(want)) || capTracks[0]; return t.lang + (t.auto ? '|a' : '|m'); })();
+  const pick = capLang || (() => { const t = allCapTracks.find((x) => x.lang.toLowerCase() === want) || allCapTracks.find((x) => x.lang.toLowerCase().startsWith(want)) || allCapTracks[0]; return t.lang + (t.auto ? '|a' : '|m'); })();
   const [lang, kind] = pick.split('|');
   try { const vtt = await api.subsGet(id, lang, kind === 'a'); if (current?.id !== id) return; transcript = { id, cues: parseVttCues(cleanVtt(vtt)) }; }
   catch (e) { if (current?.id === id) transcript = { id, cues: [], error: e.message }; }
@@ -2424,7 +2424,7 @@ function paintRc() {
   const el = $('#rc-panel'); if (!el) return;
   const hasCh = chapters.length > 0, hasTr = allCapTracks.length > 0;
   const want = chaptersSide() && settings.sidePanel !== false && (hasCh || hasTr) && !rcDismissed && current;
-  el.hidden = !want; if (!want) return;
+  el.hidden = !want; $('#watch').classList.toggle('rc-on', !!want); if (!want) return;
   if (rcTab === 'chapters' && !hasCh) rcTab = 'transcript';
   if (rcTab === 'transcript' && !hasTr) rcTab = 'chapters';
   el.classList.toggle('closed', !rcOpen);

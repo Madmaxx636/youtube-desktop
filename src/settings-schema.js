@@ -197,7 +197,6 @@ const SCHEMA = {
         { key: 'floatSize', type: 'select', label: 'Floating player size', options: opt(['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']), when: (s) => s.floatPlayer !== false },
         { key: 'floatCorner', type: 'select', label: 'Floating player corner', options: opt(['br', 'Bottom right'], ['bl', 'Bottom left'], ['tr', 'Top right'], ['tl', 'Top left']), when: (s) => s.floatPlayer !== false },
         { key: 'sidePanel', type: 'toggle', label: 'Show the "In this video" panel (chapters and transcript) beside the video' },
-        { key: 'chaptersPlace', type: 'select', label: 'Chapters go', options: opt(['side', 'In the side panel, above the suggested videos'], ['below', 'Below the video, in the description area']) },
         { key: 'relatedChips', type: 'toggle', label: 'Filter chips above the suggested videos' },
         { key: 'tabsBar', type: 'toggle', label: 'Show open videos as tabs at the top (middle-click, Ctrl+click or a 3-finger tap on a video adds one)' },
         { key: 'pbTheater', type: 'toggle', label: 'Video bar: theater mode button' },

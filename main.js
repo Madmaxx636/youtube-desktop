@@ -59,6 +59,8 @@ async function innertube() {
 
 // Account data uses a second, signed-in session. The token comes from Google's TV device flow, so every request
 // from this session is sent as the TV client; that is the one client that accepts it.
+// The TV player wants its own timestamp format: the web player's five digits with 001 added. Anything else gets "The page needs to be reloaded" (SmartTube found the same).
+const tvSts = (i) => { const v = String(i.session.player?.signature_timestamp || ''); return +(v.length === 5 ? v + '001' : v) || 0; };
 async function buildAuthSession() {
   const { Innertube } = await import('youtubei.js');
   const st = acc.read(), a = st.accounts.find((x) => x.id === st.active);
@@ -71,6 +73,8 @@ async function buildAuthSession() {
     if (x) { x.creds = seal(credentials); acc.write(s2); }
   });
   await i.session.signIn(unseal(a.creds));
+  // SmartTube: a visitor id made up for the signed-out session must not ride along with a signed-in one, or history is not recorded for the account.
+  try { i.session.context.client.visitorData = ''; } catch {}
   const exec = i.actions.execute.bind(i.actions);
   i.actions.execute = (endpoint, args = {}) => exec(endpoint, { ...args, client: 'TV' });
   return i;
@@ -1088,6 +1092,18 @@ const handlers = {
     if (HIDDEN) return; if (/^https:\/\//.test(url)) shell.openExternal(url); },
   'app:mini'(on) { toggleMini(on); },
   // Diagnostics: how much each active stream has downloaded ahead in the local cache.
+  // Developer check: what the signed-in player answers for a video (read only, nothing is reported to YouTube).
+  async 'dev:playerCheck'(id, o = {}) {
+    checkId(id);
+    const i = await authed();
+    if (o.visitor !== undefined) i.session.context.client.visitorData = o.visitor;
+    const sts = o.sts ?? tvSts(i);
+    const body = { videoId: id, cpn: crypto.randomBytes(12).toString('base64url').slice(0, 16), contentCheckOk: true, racyCheckOk: true, parse: false };
+    if (!o.noCtx) body.playbackContext = { contentPlaybackContext: { html5Preference: 'HTML5_PREF_WANTS', lactMilliseconds: 60000, isInlinePlaybackNoAd: true, signatureTimestamp: sts }, devicePlaybackCapabilities: { supportsVp9Encoding: true, supportXhr: false } };
+    const raw = await i.actions.execute('/player', body);
+    const d = raw.data || raw;
+    return { status: d.playabilityStatus?.status, reason: d.playabilityStatus?.reason || '', streams: !!d.streamingData, tracking: Object.keys(d.playbackTracking || {}), sts: i.session.player?.signature_timestamp || 0 };
+  },
   'dev:log'(since) { return logRing.filter((l) => l.t > (+since || 0)); },
   'dev:logClear'() { logRing.length = 0; return true; },
   'dev:verbose'(on) { devVerbose = !!on; dlog('info', 'verbose logging ' + (devVerbose ? 'on' : 'off')); return true; },
@@ -1117,8 +1133,13 @@ const handlers = {
     const cpn = crypto.randomBytes(12).toString('base64url').slice(0, 16);
     let pt = null;
     try {
-      const raw = await i.actions.execute('/player', { videoId: id, cpn, contentCheckOk: true, racyCheckOk: true, parse: false });
-      const t = (raw.data || raw).playbackTracking;
+      const raw = await i.actions.execute('/player', {
+        videoId: id, cpn, contentCheckOk: true, racyCheckOk: true, parse: false,
+        // The same playback context SmartTube sends (without the signature timestamp the TV player answers "The page needs to be reloaded").
+        playbackContext: { contentPlaybackContext: { html5Preference: 'HTML5_PREF_WANTS', lactMilliseconds: 60000, isInlinePlaybackNoAd: true, signatureTimestamp: tvSts(i) }, devicePlaybackCapabilities: { supportsVp9Encoding: true, supportXhr: false } },
+      });
+      const t = (raw.data || raw).playbackTracking, d0 = raw.data || raw;
+      console.info(`history: player ${d0.playabilityStatus?.status || '?'}${d0.playabilityStatus?.reason ? ' (' + d0.playabilityStatus.reason + ')' : ''}, streams ${d0.streamingData ? 'yes' : 'no'}, tracking ${Object.keys(t || {}).join(',') || 'none'}`);
       if (t?.videostatsPlaybackUrl?.baseUrl) pt = { videostats_playback_url: t.videostatsPlaybackUrl.baseUrl, videostats_watchtime_url: t.videostatsWatchtimeUrl?.baseUrl };
     } catch {}
     if (!pt?.videostats_playback_url) { const info = await (await innertube()).getInfo(id); pt = info.page?.[0]?.playback_tracking || info.playback_tracking; }

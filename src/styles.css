@@ -996,3 +996,11 @@ body.touch .np-row{padding:14px}
 .chap-tr .tr-row{display:flex;gap:10px;padding:3px 0;cursor:pointer;font-size:13px}
 .chap-tr .tr-row:hover .tx{color:var(--fg)}
 .chap-tr .tx{color:var(--fg2)}
+
+/* the side panel keeps its column even when the suggested videos are below or hidden */
+#watch.rc-on.rel-below,#watch.rc-on.rel-hidden,#watch.rc-on.theater.rel-below,#watch.rc-on.theater.rel-hidden{grid-template-columns:minmax(0,1fr) var(--related-w,400px);grid-template-areas:"player related" "details related"}
+#watch.rc-on.theater,#watch.rc-on.theater.rel-below,#watch.rc-on.theater.rel-hidden{grid-template-areas:"player player" "details related"}
+#watch.rel-hidden.rc-on #right-col{display:flex}
+#watch.rc-on.rel-below #related{display:flex;flex-direction:column;grid-template-columns:none}
+#watch.rc-on.rel-below #related .card{display:flex}
+#watch.rc-on.rel-below #related .card .th{width:calc(var(--related-w,400px)*.42);border-radius:8px}

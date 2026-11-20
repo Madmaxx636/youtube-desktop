@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.5
+
+- Fixed: videos you watch here now show as watched, with their progress, on YouTube on the web and on the phone. Cause: the signed-in player request the app made to get its tracking addresses was being refused by YouTube ("The page needs to be reloaded"), so the app silently fell back to the signed-out addresses, and YouTube never tied the views to your account. The TV player needs its own signature timestamp format (the usual five digits with 001 added) and a playback context, as SmartTube sends. With that, the request is accepted and the pings are recorded: in a test the video appeared at the top of the account's history with its progress.
+- The signed-in session no longer sends a visitor id made up for the signed-out one.
+- The transcript is looked up from every caption track the video has, so it still appears (under the chapters and in its own tab) when auto-generated captions are switched off for display.
+- Chapters and the transcript are always in the side panel ("In this video"), whichever way the suggested videos are shown (beside, below or hidden); the panel keeps its column. The "Chapters go" setting is gone. The panel can still be turned off in Settings, Layout, which brings back the chapter strip below the video.
+- Developer tab: the log now says what the signed-in player answered when history is reported (status, whether streams and tracking were returned).
+
 ## 0.11.4
 
 - Chapters now have their transcript: each chapter in the "In this video" panel has a "Transcript" button that opens the words spoken during that chapter underneath it (click a line to jump there). It is collapsed until you press it.
