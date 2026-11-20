@@ -79,6 +79,9 @@ const SCHEMA = {
         { key: 'bufferSeconds', type: 'select', label: 'Buffer ahead', options: opt(['15', '15 seconds'], ['30', '30 seconds'], ['60', '1 minute'], ['120', '2 minutes'], ['180', '3 minutes'], ['300', '5 minutes'], ['600', '10 minutes'], ['1200', '20 minutes'], ['1800', '30 minutes']), when: (s) => s.bufferProxy !== false, hint: 'More buffer uses more memory (a few hundred MB for 4K at 5 minutes). Applies to the next video.' },
         { key: 'bufferMaxMB', type: 'select', label: 'Most the buffer may hold', options: opt(['256', '256 MB'], ['512', '512 MB'], ['1024', '1 GB'], ['2048', '2 GB'], ['4096', '4 GB']), hint: 'Big buffers are kept in a temporary folder on disk (emptied when you quit), so memory stays low. A few minutes of 4K is about a gigabyte.', when: (s) => s.bufferProxy !== false },
       ] },
+      { title: 'Troubleshooting', items: [
+        { type: 'button', label: 'Copy the playback log (what went wrong with the sound or the stream, for bug reports)', action: 'copyMediaLog' },
+      ] },
       { title: 'Audio', items: [
         { key: 'audioCodec', type: 'select', label: 'Audio codec', options: opt(['auto', 'Automatic'], ['aac', 'AAC'], ['opus', 'Opus']) },
         { key: 'stableAudio', type: 'select', label: 'Stable audio', options: opt(['off', 'Off'], ['levels', 'Even out loudness between videos'], ['compress', 'Also even out loud and quiet parts inside a video']), hint: 'Uses the loudness YouTube reports for each video. Nothing changes the file you download.' },

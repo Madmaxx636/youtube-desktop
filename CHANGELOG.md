@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.1
+
+- Fixed: the sound dropping out for good, after a long pause or after skipping ahead or back. Cause: the local stream cache forgot a stream's address after 20 minutes without a request, and the sound track is downloaded in the first few seconds and then not asked for again, so in a longer video (or after a long pause) its address was gone. The next skip needed the sound again, got "not found", and the sound stayed dead for the rest of the video while the picture carried on. Addresses now stay valid for six hours (only the cached data is freed when a stream has been idle), and a stream that is in the middle of being read is never cut off.
+- The player now looks after the sound itself. Once a second while a video plays it restarts the sound if it was paused, starts it if its clock was lost, wakes the audio engine if it fell asleep, and replaces the sound element if it errors or has been stuck for six seconds (first with a fresh element for the same address, then by looking the video up again). A dropped stream reconnects up to four times in two minutes instead of once per video. In testing, each of these (a dead sound element, a suspended audio engine, a sound paused behind the player's back, a stuck element, a dead sound address after a skip) recovered within one to seven seconds.
+- The stream cache asks again for a chunk it had cancelled instead of cutting the response, which would also have made the sound fail.
+- A paused sound is no longer "re-synced" by seeking it, which hid a stalled sound from the check above.
+- Settings, Video & audio, Troubleshooting: "Copy the playback log" copies a short record of anything that went wrong with the sound or the stream (errors, restarts, reconnects), so a drop I cannot reproduce can be looked at.
+- A stream kept in memory (the sound and short videos) is capped at 128 MB; it could grow to the whole cache limit before.
+
+
 ## 0.11.0
 
 - Floating player: going to the home page, a channel, a playlist, subscriptions or any other page no longer stops the video. It keeps playing in a small player in the bottom-right corner (size and corner are in Settings, Layout) that you can close with the x, or click to go back to the video with no reload. The next video of a queue or playlist loads there too, and Space, M, J, L and Shift+N work on it. Esc on the video page now minimizes it instead of stopping it.

@@ -517,9 +517,19 @@ function removeStream(token) {
   dropQueued(st); st.chunks.clear(); st.hot.clear(); streamsMap.delete(token);
   fs.promises.rm(path.join(CACHE_ROOT, token), { recursive: true, force: true }).catch(() => {});
 }
-setInterval(() => {
-  for (const [k, s] of streamsMap) { const idle = Date.now() - (s.last || s.created); if (idle > (s.retired ? 2 * 60 * 1000 : 20 * 60 * 1000)) removeStream(k); }
-}, 60 * 1000).unref();
+// A stream the player may still come back to (a long pause) keeps its address; only its cached chunks are freed after a while. The address
+// itself goes after 6 hours (YouTube's links expire then anyway), and an old video's stream goes after two minutes.
+function sweepStreams(activeIdleMs = 20 * 60 * 1000) {
+  for (const [k, s] of streamsMap) {
+    const idle = Date.now() - (s.last || s.created);
+    if (s.retired) { if (idle > 2 * 60 * 1000) removeStream(k); }
+    else if (idle > 6 * 60 * 60 * 1000) removeStream(k);
+    else if (idle > activeIdleMs && s.chunks.size) { dropQueued(s); for (const e of s.chunks.values()) if (!e.done && !e.refs) abortEntry(e); for (const ci of [...s.chunks.keys()]) if (s.chunks.get(ci)?.done) forgetChunk(s, ci); }
+  }
+}
+setInterval(sweepStreams, 60 * 1000).unref();
+if (HIDDEN) globalThis.__sweep = sweepStreams; // test mode only: lets a test act as if the player had been idle for a long time
+if (HIDDEN) globalThis.__dropKind = (kind) => { for (const [t, st] of streamsMap) if (st.mime.startsWith(kind)) removeStream(t); }; // test mode only: makes a stream's address stop working, as if it had expired
 async function handleProxy(req, res) {
   // The player runs the sound through Web Audio (stable audio), which needs the stream to be cross-origin readable.
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges' };
@@ -544,25 +554,34 @@ async function handleProxy(req, res) {
     while (pos <= end && !closed) {
       const ci = Math.floor(pos / CHUNK);
       st.last = Date.now();
-      const need = chunk(st, ci, true); // the chunk playback needs now jumps the queue
-      const ent = st.chunks.get(ci); if (ent) ent.refs++;
-      // The player jumping somewhere else (a seek) makes the queue and the downloads meant for the old spot useless. Reads near the end of
-      // the file (the index) are only probes and do not count as a jump.
-      if (ci < nChunks - 2) {
-        if (st.lastCi == null || ci < st.lastCi || ci > st.lastCi + 2) { dropQueued(st); abortLookahead(st); st.sinceJump = 0; }
-        st.lastCi = ci;
+      // A chunk that was cancelled (a seek's clean-up can cancel one that a newer request wants) or whose file went missing is simply asked
+      // for again; giving up on the response would make the player drop the stream, which for the sound means silence.
+      let buf = null;
+      for (let attempt = 0; !buf && !closed; attempt++) {
+        const need = chunk(st, ci, true); // the chunk playback needs now jumps the queue
+        const ent = st.chunks.get(ci); if (ent) ent.refs++;
+        if (attempt === 0) {
+          // The player jumping somewhere else (a seek) makes the queue and the downloads meant for the old spot useless. Reads near the
+          // end of the file (the index) are only probes and do not count as a jump.
+          if (ci < nChunks - 2) {
+            if (st.lastCi == null || ci < st.lastCi || ci > st.lastCi + 2) { dropQueued(st); abortLookahead(st); st.sinceJump = 0; }
+            st.lastCi = ci;
+          }
+          // Right after a jump (or at the very start) the next chunk is needed straight away too, so it downloads in parallel.
+          if ((st.sinceJump ?? 0) < 3) for (let k = 1; k <= PIPE_AHEAD(); k++) if ((ci + k) * CHUNK < size) chunk(st, ci + k, true, true).catch(() => {});
+          st.sinceJump = (st.sinceJump ?? 0) + 1;
+          // Playback reached the end: get the start ready too, because the next thing is most likely a replay or a rewind.
+          if (ci >= nChunks - 2 && st.lastCi != null && st.lastCi >= nChunks - 10 && !st.endWarmed && !st.retired) { st.endWarmed = true; for (let k = 0; k < Math.min(6, nChunks); k++) chunk(st, k, false).catch(() => {}); }
+        }
+        let rec = null, failure = null;
+        try { rec = await Promise.race([need, gone.then(() => null)]); } catch (e) { failure = e; }
+        finally { if (ent) { ent.refs--; if (closed && !ent.refs && !ent.done && ent.hi) abortEntry(ent); } } // the player gave up on this one (it seeked again)
+        if (failure) { if (ent && st.chunks.get(ci) === ent) st.chunks.delete(ci); if (attempt >= 2) throw failure; continue; }
+        if (!rec) break;
+        prefetch(st, ci); // the look-ahead starts once the chunk that is needed has arrived, so it never takes bandwidth from it
+        try { buf = await readChunk(st, ci, rec); } catch (e) { forgetChunk(st, ci); if (attempt >= 2) throw e; }
       }
-      // Right after a jump (or at the very start) the next chunk is needed straight away too, so it downloads in parallel.
-      if ((st.sinceJump ?? 0) < 3) for (let k = 1; k <= PIPE_AHEAD(); k++) if ((ci + k) * CHUNK < size) chunk(st, ci + k, true, true).catch(() => {});
-      st.sinceJump = (st.sinceJump ?? 0) + 1;
-      // Playback reached the end: get the start ready too, because the next thing is most likely a replay or a rewind.
-      if (ci >= nChunks - 2 && st.lastCi != null && st.lastCi >= nChunks - 10 && !st.endWarmed && !st.retired) { st.endWarmed = true; for (let k = 0; k < Math.min(6, nChunks); k++) chunk(st, k, false).catch(() => {}); }
-      let rec = null;
-      try { rec = await Promise.race([need, gone.then(() => null)]); }
-      finally { if (ent) { ent.refs--; if (closed && !ent.refs && !ent.done && ent.hi) abortEntry(ent); } } // the player gave up on this one (it seeked again)
-      if (!rec) break;
-      prefetch(st, ci); // the look-ahead starts once the chunk that is needed has arrived, so it never takes bandwidth from it
-      const buf = await readChunk(st, ci, rec);
+      if (!buf) break;
       const piece = buf.subarray(pos - ci * CHUNK, Math.min(buf.length, end - ci * CHUNK + 1));
       if (!res.write(piece)) await Promise.race([new Promise((r) => res.once('drain', r)), gone]);
       pos += piece.length;
@@ -593,6 +612,7 @@ async function proxied(url, force, warm) {
   // a buffer worth more than about 48 MB goes to disk
   const st = { warm: !!warm, token, url, size, dur, mime: decodeURIComponent(u.searchParams.get('mime') || 'video/mp4'), chunks: new Map(), hot: new Map(), created: Date.now(), policy, lastCi: null };
   st.disk = Math.min(policy.cap, dur ? (policy.secs * size) / dur : policy.cap) > 48 * MB;
+  if (!st.disk) st.policy = { ...policy, cap: Math.min(policy.cap, 128 * MB) }; // a stream kept in memory never grows past this
   streamsMap.set(token, st);
   // start on the first chunks before the player asks (a warm stream, i.e. one looked up ahead of time, gets a few more than usual)
   for (let k = 0; k < (warm && st.mime.startsWith('video') ? 3 : 1); k++) chunk(st, k, true).catch(() => {});

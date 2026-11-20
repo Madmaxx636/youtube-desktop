@@ -126,6 +126,7 @@ const ACTIONS = {
     await save({ ...D, toolbar: null, toolbarHidden: false, speed: 1, downloadDir: '' });
   },
   resetToolbar: () => save({ toolbar: null, toolbarHidden: false, menuActions: null }),
+  copyMediaLog() { api.copy(mlogBuf.length ? mlogBuf.join('\n') : 'Nothing has gone wrong with the sound or the stream since the app started.'); toast('Playback log copied'); },
   async testNotify() { const ok = await api.notify('test', 'YouTube Desktop', 'This is how a notification looks.'); if (!ok) toast('Notifications are switched off.'); },
   async checkUpdate() { toast('Checking for updates…'); const u = await api.updateCheck(); if (u.status === 'none') toast(`You have the latest version (${u.current}).`); else if (u.status === 'error') toast('Could not check: ' + u.error); },
   openDownloads: () => api.openDownloads(),
@@ -1216,21 +1217,59 @@ function setSpeed(s) {
 }
 // Video and audio arrive as separate streams, so a hidden <audio> element follows the video. The video is the clock: the sound starts
 // once the picture is really moving, small drifts are corrected by nudging the speed a little, and only a big gap is a jump.
-const audio = new Audio();
-audio.preload = 'auto'; audio.crossOrigin = 'anonymous';
+function newAudio() {
+  const a = new Audio(); a.preload = 'auto'; a.crossOrigin = 'anonymous';
+  a.addEventListener('error', () => { if (a === audio && audioActive && audioUrl) { mlog('audio element error', a.error ? a.error.code : '?'); audioFailed('error'); } });
+  return a;
+}
+let audio = newAudio(), audioUrl = '';
 let audioActive = false, audioGo = false, audioArm = null, loadSeq = 0, lastHardSeek = 0;
+// A short record of anything that went wrong with the sound or the stream (Settings, Video & audio, "Copy the playback log").
+const mlogBuf = [];
+function mlog(...a) { mlogBuf.push(new Date().toTimeString().slice(0, 8) + ' ' + a.join(' ')); if (mlogBuf.length > 80) mlogBuf.shift(); }
+// The stream itself dropped (an address that expired, the cache entry gone, a network error): look the video up again and carry on from the
+// same spot. A few tries, then give up rather than loop.
+const reconnects = { n: 0, t: 0 };
+function reconnect(why) {
+  if (!current) return false;
+  const now = Date.now(); if (now - reconnects.t > 120000) reconnects.n = 0;
+  if (reconnects.n >= 4) { mlog('reconnect refused (too many in a row):', why); return false; }
+  reconnects.n++; reconnects.t = now; mlog('reconnect:', why); toast('Reconnecting…');
+  // from the second try on, skip the highest-bitrate pick in case that is what the player cannot handle
+  loadStream(current.id, settings.quality || 'auto', video.currentTime || 0, reconnects.n >= 2).catch(() => {});
+  return true;
+}
+// A new <audio> element for the same address (the old one may be stuck after an error) that joins the video where it is.
+function swapAudio(src, t) {
+  const old = audio, a = newAudio();
+  if (/^http:\/\/127\.0\.0\.1/.test(src)) a.crossOrigin = 'anonymous'; else a.removeAttribute('crossorigin');
+  a.src = src; audioUrl = src;
+  if (t > 0.5) { try { a.currentTime = t; } catch {} }
+  audio = a; audioActive = true;
+  if (sa.ctx) { try { sa.audioSrc?.disconnect(); sa.audioSrc = sa.ctx.createMediaElementSource(a); sa.audioSrc.connect(sa.norm); } catch (e) { mlog('could not rejoin the audio graph:', e.message); } }
+  try { old.pause(); old.removeAttribute('src'); old.load(); } catch {}
+  audioGo = false; audioArm = null; if (!video.paused) armAudio();
+}
+const audioFix = { n: 0, t: 0 };
+function audioFailed(why) {
+  if (!audioActive || !current) return;
+  const now = Date.now(); if (now - audioFix.t > 60000) audioFix.n = 0;
+  audioFix.t = now; audioFix.n++; mlog('sound failed:', why, '(try', audioFix.n + ')');
+  if (audioFix.n <= 2) swapAudio(audioUrl, video.currentTime); // first a fresh element for the same address
+  else reconnect('sound: ' + why); // then look the address up again
+}
 function syncAudio(hard) {
   if (!audioActive) return;
   audio.volume = video.volume; audio.muted = video.muted;
   const base = video.playbackRate || 1;
   if (!audioGo) { audio.playbackRate = base; return; }
-  if (audio.seeking || audio.readyState < 3) return; // still loading: seeking it again would only restart its download
+  if (audio.paused || audio.seeking || audio.readyState < 3) return; // paused (the watchdog restarts it) or still loading: seeking it again would only restart its download
   const d = audio.currentTime - video.currentTime;
   if (hard || Math.abs(d) > 0.6) { if (hard || Date.now() - lastHardSeek > 2000) { lastHardSeek = Date.now(); audio.currentTime = video.currentTime; } audio.playbackRate = base; return; }
   audio.playbackRate = Math.abs(d) > 0.04 ? base * (1 - Math.max(-0.05, Math.min(0.05, d * 0.5))) : base;
 }
 const stopAudioClock = () => { audioGo = false; audioArm = null; if (audioActive) audio.pause(); };
-const armAudio = () => { if (audioActive && !video.paused) { audioGo = false; audioArm = { t: video.currentTime }; } };
+const armAudio = () => { if (audioActive && !video.paused) { audioGo = false; audioArm = { t: video.currentTime, at: Date.now() }; } };
 video.addEventListener('playing', armAudio);
 video.addEventListener('timeupdate', () => {
   if (audioArm && !video.paused && !video.seeking && video.currentTime > audioArm.t + 0.01) {
@@ -1242,6 +1281,26 @@ video.addEventListener('seeked', () => { if (!video.paused) armAudio(); else if 
 video.addEventListener('ratechange', () => syncAudio(false));
 video.addEventListener('volumechange', () => syncAudio(false));
 setInterval(() => { if (audioActive && audioGo && !video.paused && !video.seeking) syncAudio(false); }, 500);
+
+// Watches over the sound once a second while the video plays: restarts it if it was paused, gets it going if the clock was lost, wakes the
+// audio graph if it fell asleep, and replaces the audio element when it has stopped for good or been stuck for six seconds.
+const wd = { v: 0, a: 0, stall: 0 };
+setInterval(() => {
+  if (!current) return;
+  const playing = !video.paused && !video.ended && !video.seeking && video.readyState >= 3;
+  if (sa.ctx && sa.ctx.state !== 'running' && !video.paused) sa.ctx.resume().catch(() => {});
+  if (!audioActive || !playing) { wd.stall = 0; wd.v = video.currentTime; wd.a = audio.currentTime; return; }
+  if (audio.error) { audioFailed('error state'); return; }
+  if (audio.ended || (isFinite(audio.duration) && video.currentTime >= audio.duration - 0.3)) { wd.stall = 0; wd.v = video.currentTime; wd.a = audio.currentTime; return; } // the sound simply ends a little before the picture
+  if (audioArm && Date.now() - audioArm.at > 3000) { audioArm = null; audioGo = true; audio.currentTime = video.currentTime; syncAudio(false); audio.play().catch(() => {}); } // never started: start it now
+  else if (!audioGo && !audioArm) armAudio(); // the sound clock was lost: start it again
+  else if (audioGo && audio.paused && !audio.ended) { mlog('sound was paused while the video played: restarting it'); audio.play().catch(() => {}); }
+  const vAdv = video.currentTime - wd.v, aAdv = audio.currentTime - wd.a;
+  if (audioGo && vAdv > 0.6 && aAdv < 0.2) { if (++wd.stall >= 6) { wd.stall = 0; mlog('sound stalled for 6 s, readyState', audio.readyState); audioFailed('stalled'); } } else wd.stall = 0;
+  wd.v = video.currentTime; wd.a = audio.currentTime;
+}, 1000);
+for (const ev of ['play', 'seeked']) video.addEventListener(ev, () => { if (sa.ctx && sa.ctx.state !== 'running') sa.ctx.resume().catch(() => {}); });
+document.addEventListener('visibilitychange', () => { if (sa.ctx && sa.ctx.state !== 'running' && !video.paused) sa.ctx.resume().catch(() => {}); });
 
 // Empties the player (picture and sound) so the next video starts from a clean state and the old buffers are freed.
 function resetMedia() {
@@ -1261,7 +1320,7 @@ async function loadStream(id, quality, startAt, safe) {
   const local = /^http:\/\/127\.0\.0\.1/.test(s.video || s.audio || '');
   if (local) { video.crossOrigin = 'anonymous'; audio.crossOrigin = 'anonymous'; } else { video.removeAttribute('crossorigin'); audio.removeAttribute('crossorigin'); }
   video.src = s.video || s.audio;
-  if (s.video && s.audio) { audio.src = s.audio; audioActive = true; }
+  if (s.video && s.audio) { audio.src = s.audio; audioUrl = s.audio; audioActive = true; }
   const t = startAt || 0;
   if (t > 0.5) { try { video.currentTime = t; if (audioActive) audio.currentTime = t; } catch {} }
   video.playbackRate = speed;
@@ -1282,7 +1341,9 @@ function ensureAudioGraph() {
     const ctx = new AudioContext();
     sa.norm = ctx.createGain(); sa.comp = ctx.createDynamicsCompressor(); sa.make = ctx.createGain(); sa.lim = ctx.createDynamicsCompressor();
     sa.lim.threshold.value = -2; sa.lim.knee.value = 0; sa.lim.ratio.value = 20; sa.lim.attack.value = 0.002; sa.lim.release.value = 0.1;
-    for (const el of [video, audio]) ctx.createMediaElementSource(el).connect(sa.norm);
+    sa.videoSrc = ctx.createMediaElementSource(video); sa.videoSrc.connect(sa.norm);
+    sa.audioSrc = ctx.createMediaElementSource(audio); sa.audioSrc.connect(sa.norm);
+    ctx.onstatechange = () => { mlog('audio context', ctx.state); if (ctx.state !== 'running' && !video.paused) ctx.resume().catch(() => {}); };
     sa.norm.connect(sa.comp); sa.comp.connect(sa.make); sa.make.connect(sa.lim); sa.lim.connect(ctx.destination);
     sa.ctx = ctx; return true;
   } catch { sa.ctx = null; return false; }
@@ -1805,10 +1866,9 @@ video.addEventListener('timeupdate', () => {
 // If the stream drops (an expired link, a network change), fetch a fresh one once and carry on from the same spot.
 let streamRetries = 0;
 video.addEventListener('error', () => {
-  if (!current || streamRetries >= 1 || !video.currentSrc) return;
-  streamRetries++; toast('Reconnecting…');
-  // the retry skips the highest-bitrate pick, in case that particular stream is the one the player cannot handle
-  loadStream(current.id, settings.quality || 'auto', video.currentTime || 0, true).catch(() => {});
+  if (!current || !video.currentSrc) return;
+  mlog('video element error', video.error ? video.error.code : '?');
+  reconnect('video error');
 });
 video.addEventListener('ended', () => {
   saveProgress(true); if (sleepEnding) return fireSleep();
