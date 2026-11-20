@@ -2345,7 +2345,7 @@ const histWarn = (e) => { if (!histWarned) { histWarned = true; toast('Could not
 video.addEventListener('playing', () => {
   if (!current || histSent === current.id || !histOn()) return;
   histSent = current.id; histLastT = Date.now();
-  api.historyStart(current.id).catch(histWarn);
+  api.historyStart(current.id, video.currentTime || 0).catch(histWarn);
 });
 const histTime = (mode) => { if (current && histSent === current.id && histOn() && video.currentTime > 0) api.historyTime(current.id, video.currentTime, typeof mode === 'string' ? mode : 'final').catch(() => {}); };
 video.addEventListener('pause', () => { if (!video.ended) histTime('paused'); });
@@ -2388,10 +2388,10 @@ api.updateState().then(paintUpdate).catch(() => {});
 
 // ---------- side panel: chapters and transcript ("In this video"), like YouTube ----------
 const chaptersSide = () => settings.chaptersPlace !== 'below' && settings.watchRelated !== 'hidden';
-let rcTab = 'chapters', rcOpen = false, rcDismissed = false, allCapTracks = [], chapLoop = null, transcript = null, trIdx = -1;
+let chapTr = new Set(), rcTab = 'chapters', rcOpen = false, rcDismissed = false, allCapTracks = [], chapLoop = null, transcript = null, trIdx = -1;
 const vUrl = (t) => `https://www.youtube.com/watch?v=${current?.id}${t != null ? '&t=' + Math.floor(t) : ''}`;
 function setChapters(list) {
-  chapters = list; chapLoop = null; marksSig = ''; transcript = null; trIdx = -1; lastChap = -1; // (the panel stays closed with the X until the app is restarted)
+  chapters = list; chapTr = new Set(); chapLoop = null; marksSig = ''; transcript = null; trIdx = -1; lastChap = -1; // (the panel stays closed with the X until the app is restarted)
   const box = $('#w-chapters'); box.hidden = true;
   if (list.length && !chaptersSide()) { box.hidden = false; chapOpen = false; paintChapters(); }
   rcTab = list.length ? 'chapters' : 'transcript'; rcOpen = false; // collapsed: the header and the tabs; click a tab to open it
@@ -2433,16 +2433,18 @@ function paintRc() {
   const prevScroll = body.scrollTop;
   if (rcTab === 'chapters') {
     const k = chapAt(video.currentTime || 0);
-    body.innerHTML = chapters.map((c, i) => `<div class="rc-row${i === k ? ' cur' : ''}" data-i="${i}">${c.thumb ? `<img loading="lazy" decoding="async" src="${esc(c.thumb)}">` : '<span class="noimg"></span>'}<div class="tt"><span class="ti">${esc(c.title)}</span><span class="tm">${fmtDur(c.t)}</span></div><div class="acts"><button data-a="share" title="Copy link to this chapter">${ic('share')}</button><button data-a="loop" title="Loop this chapter" class="${chapLoop?.i === i ? 'on' : ''}">${ic('repeat')}</button></div></div>`).join('');
+    body.innerHTML = chapters.map((c, i) => `<div class="rc-row${i === k ? ' cur' : ''}" data-i="${i}">${c.thumb ? `<img loading="lazy" decoding="async" src="${esc(c.thumb)}">` : '<span class="noimg"></span>'}<div class="tt"><span class="ti">${esc(c.title)}</span><span class="tm">${fmtDur(c.t)}</span>${hasTr ? `<button class="trtog" data-a="tr">${chapTr.has(i) ? 'Hide transcript' : 'Transcript'}</button>` : ''}</div><div class="acts"><button data-a="share" title="Copy link to this chapter">${ic('share')}</button><button data-a="loop" title="Loop this chapter" class="${chapLoop?.i === i ? 'on' : ''}">${ic('repeat')}</button></div></div>${chapTr.has(i) ? chapTranscriptHtml(i) : ''}`).join('');
     body.querySelectorAll('.rc-row').forEach((row) => {
       const i = +row.dataset.i, c = chapters[i];
       row.onclick = (e) => {
         const a = e.target.closest('button')?.dataset.a;
+        if (a === 'tr') { if (chapTr.has(i)) chapTr.delete(i); else { chapTr.add(i); loadTranscript(); } return paintRc(); }
         if (a === 'share') { api.copy(vUrl(c.t)); return toast('Link to this chapter copied'); }
         if (a === 'loop') { chapLoop = chapLoop?.i === i ? null : { i, a: c.t, b: chapters[i + 1]?.t ?? vdur() }; if (chapLoop) { video.currentTime = c.t; video.play().catch(() => {}); toast('Looping this chapter'); } return paintRc(); }
         video.currentTime = c.t; video.play().catch(() => {});
       };
     });
+    body.querySelectorAll('.tr-row[data-ci]').forEach((row) => (row.onclick = () => { video.currentTime = +row.dataset.ci; video.play().catch(() => {}); }));
     const cur = body.querySelector('.rc-row.cur'); if (cur && lastRcChap !== k) { lastRcChap = k; body.scrollTop = Math.max(0, cur.offsetTop - body.offsetTop - 8); } else body.scrollTop = prevScroll;
   } else {
     if (!transcript || transcript.id !== current.id) { body.innerHTML = '<div class="rc-note">Loading the transcript…</div>'; loadTranscript(); return; }
@@ -2454,6 +2456,12 @@ function paintRc() {
   }
 }
 let lastRcChap = -1;
+// The words spoken during one chapter, shown under it when its "Transcript" button is pressed.
+function chapTranscriptHtml(i) {
+  if (!transcript || transcript.id !== current?.id || !transcript.cues) return '<div class="rc-note chap-tr">Loading the transcript…</div>';
+  const a = chapters[i].t, b = chapters[i + 1]?.t ?? Infinity, cues = transcript.cues.filter((c) => c.t >= a && c.t < b);
+  return `<div class="chap-tr">${cues.length ? cues.map((c) => `<div class="tr-row" data-ci="${c.t}"><span class="tm">${fmtDur(c.t)}</span><span class="tx">${esc(c.text)}</span></div>`).join('') : '<div class="rc-note">No transcript for this chapter.</div>'}</div>`;
+}
 function paintTranscriptNow(scroll) {
   if (!transcript?.cues?.length || rcTab !== 'transcript' || !rcOpen) return;
   const t = video.currentTime || 0; let lo = 0, hi = transcript.cues.length - 1, k = 0;

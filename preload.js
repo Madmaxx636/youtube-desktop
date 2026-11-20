@@ -57,7 +57,7 @@ contextBridge.exposeInMainWorld('api', {
   openExternal: (u) => call('app:openExternal', u),
   mini: (on) => call('app:mini', on),
   copy: (t) => call('app:copy', t),
-  historyStart: (id) => call('me:historyStart', id),
+  historyStart: (id, t) => call('me:historyStart', id, t),
   historyTime: (id, t, mode) => call('me:historyTime', id, t, mode),
   prefetch: (id, perf, urgent) => call('yt:prefetch', id, perf, urgent),
   notify: (kind, title, body, vid) => call('app:notify', kind, title, body, vid),

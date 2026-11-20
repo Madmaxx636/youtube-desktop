@@ -989,3 +989,10 @@ body.touch .np-row{padding:14px}
 #dev-log .lg.warn{color:#e0a030}
 #dev-log .lg.error{color:#e05555}
 #dev-log .lg.debug{color:var(--fg2)}
+
+.rc-row .trtog{background:none;color:var(--fg2);font-size:12px;padding:2px 0;text-decoration:underline;text-underline-offset:2px}
+.rc-row .trtog:hover{color:var(--fg)}
+.chap-tr{padding:0 12px 8px 136px}
+.chap-tr .tr-row{display:flex;gap:10px;padding:3px 0;cursor:pointer;font-size:13px}
+.chap-tr .tr-row:hover .tx{color:var(--fg)}
+.chap-tr .tx{color:var(--fg2)}

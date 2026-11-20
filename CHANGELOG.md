@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.4
+
+- Chapters now have their transcript: each chapter in the "In this video" panel has a "Transcript" button that opens the words spoken during that chapter underneath it (click a line to jump there). It is collapsed until you press it.
+- Watch history on YouTube: the pings now follow SmartTube's working requests. The playback id is sent in the signed-in player request and reused in the pings (it used to be made up afterwards), the pings carry only the standard parameters and the starting position. YouTube accepts them (HTTP 204), but in testing with the signed-in account the video still did not show up in the account's history, so this is still not confirmed to work.
+
 ## 0.11.3
 
 - New Settings, About tab (version and a short description). Press and hold the app name there for five seconds, like tapping the build number on Android, to unlock hidden developer options. A Developer tab appears.

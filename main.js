@@ -685,7 +685,8 @@ function mapComment(cm, level = 0) {
 // The stats pings are not innertube calls, so the library does not attach the sign-in to them; do it here.
 async function statsPing(i, url, client, params) {
   const u = new URL(url.replace('https://s.', 'https://www.'));
-  u.searchParams.set('ver', '2'); u.searchParams.set('c', client.name.toLowerCase()); u.searchParams.set('cbrver', client.version); u.searchParams.set('cver', client.version);
+  // Only the parameters SmartTube sends (ns, ver, docid, len, cpn, cmt, ei, vm, of, st, et): extra client labels are not part of its working requests.
+  u.searchParams.set('ns', 'yt'); u.searchParams.set('ver', '2');
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   const oauth = i.session.oauth;
   if (oauth.shouldRefreshToken()) await oauth.refreshAccessToken();
@@ -1107,22 +1108,24 @@ const handlers = {
   },
   'app:notify'(kind, title, body, vid) { return notify(kind, String(title || ''), String(body || ''), vid || null); },
   // ----- adds what you watch here to your YouTube watch history (signed in) -----
-  async 'me:historyStart'(id) {
+  async 'me:historyStart'(id, start) {
     checkId(id);
     const i = await authed();
     const { Constants } = await import('youtubei.js'), tv = Constants?.CLIENTS?.TV || { NAME: 'TVHTML5', VERSION: '7.20260311.12.00' };
     // The tracking addresses must come from a player request made while signed in, otherwise YouTube does not tie the view to your account.
+    // SmartTube's finding: the playback nonce (cpn) has to be sent in the player request itself and then reused in the pings; a nonce YouTube never saw is ignored.
+    const cpn = crypto.randomBytes(12).toString('base64url').slice(0, 16);
     let pt = null;
     try {
-      const raw = await i.actions.execute('/player', { videoId: id, contentCheckOk: true, racyCheckOk: true, parse: false });
+      const raw = await i.actions.execute('/player', { videoId: id, cpn, contentCheckOk: true, racyCheckOk: true, parse: false });
       const t = (raw.data || raw).playbackTracking;
       if (t?.videostatsPlaybackUrl?.baseUrl) pt = { videostats_playback_url: t.videostatsPlaybackUrl.baseUrl, videostats_watchtime_url: t.videostatsWatchtimeUrl?.baseUrl };
     } catch {}
     if (!pt?.videostats_playback_url) { const info = await (await innertube()).getInfo(id); pt = info.page?.[0]?.playback_tracking || info.playback_tracking; }
     if (!pt?.videostats_playback_url) throw new Error('YouTube gave no playback tracking for this video.');
-    const cpn = crypto.randomBytes(12).toString('base64url').slice(0, 16), client = { name: tv.NAME, version: tv.VERSION };
-    histInfos.set(id, { pt, cpn, client }); capMap(histInfos, 20);
-    const r = await statsPing(i, pt.videostats_playback_url, client, { cpn, fmt: 251, rtn: 0, rt: 0 });
+    const client = { name: tv.NAME, version: tv.VERSION };
+    histInfos.set(id, { pt, cpn, client, last: +start || 0 }); capMap(histInfos, 20);
+    const r = await statsPing(i, pt.videostats_playback_url, client, { cpn, cmt: (+start || 0).toFixed(3) });
     if (!r.ok) throw new Error('YouTube answered ' + r.status);
     return true;
   },
@@ -1130,7 +1133,7 @@ const handlers = {
   async 'me:historyTime'(id, seconds, mode) {
     const h = histInfos.get(String(id)); if (!h?.pt?.videostats_watchtime_url) return false;
     const t = Math.max(0, +seconds || 0), st = Math.min(h.last || 0, t);
-    const p = { cpn: h.cpn, st: st.toFixed(3), et: t.toFixed(3), cmt: t.toFixed(3), state: mode === 'paused' ? 'paused' : 'playing' };
+    const p = { cpn: h.cpn, st: st.toFixed(3), et: t.toFixed(3), cmt: t.toFixed(3) };
     if (mode === 'final') p.final = '1';
     h.last = t;
     const r = await statsPing(await authed(), h.pt.videostats_watchtime_url, h.client, p);
