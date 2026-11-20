@@ -23,7 +23,7 @@ const SCHEMA = {
     watchRelated: 'side', theater: false, commentsHidden: false, descExpanded: false, showDislikes: true,
     subsView: 'grouped', subsGroupBy: 'date', subsHideWatched: true, subsSort: 'new', subsLayout: 'list',
     sponsorblock: true, sbc_sponsor: true, sbc_selfpromo: true, sbc_interaction: true, sbc_intro: true, sbc_outro: true, sbc_preview: false, sbc_music_offtopic: false, sbc_filler: false,
-    dearrow: true, ryd: true, pauseHistory: false, devMode: false, devVerbose: false,
+    dearrow: true, ryd: true, pauseHistory: false, autocorrect: true, miniConfirmClose: true, devMode: false, devVerbose: false,
   },
   tabs: [
     { id: 'general', label: 'General', groups: [
@@ -31,6 +31,9 @@ const SCHEMA = {
         { key: 'swipeNav', type: 'toggle', label: 'Two-finger swipe goes back and forward', hint: 'Swipe right to go back, left to go forward, like in a browser.' },
         { key: 'swipeDistance', type: 'range', label: 'Swipe distance needed', min: 60, max: 400, step: 10, unit: ' px', when: (s) => s.swipeNav },
         { key: 'swipeInvert', type: 'toggle', label: 'Reverse the swipe direction', when: (s) => s.swipeNav },
+      ] },
+      { title: 'Typing', items: [
+        { key: 'autocorrect', type: 'toggle', label: 'Correct misspelled words as I type', hint: 'In comments, replies and the search box. A correction is made when you press space; Ctrl+Z undoes it. Misspelled words are also underlined, with suggestions in the right-click menu.' },
       ] },
       { title: 'Startup', items: [
         { key: 'startPage', type: 'select', label: 'Open on', options: opt(['home', 'Home'], ['subs', 'Subscriptions'], ['playlists', 'Playlists'], ['history', 'History']) },
@@ -195,6 +198,7 @@ const SCHEMA = {
         { key: 'theater', type: 'toggle', label: 'Theater mode (wide player)' },
         { key: 'floatPlayer', type: 'toggle', label: 'Keep the video playing in a corner while I browse', hint: 'Going to the home page, a channel, a playlist or subscriptions keeps the video going in a small player you can close or click to go back to.' },
         { key: 'floatSize', type: 'select', label: 'Floating player size', options: opt(['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']), when: (s) => s.floatPlayer !== false },
+        { key: 'miniConfirmClose', type: 'toggle', label: 'Ask before closing the floating player' },
         { key: 'floatCorner', type: 'select', label: 'Floating player corner', options: opt(['br', 'Bottom right'], ['bl', 'Bottom left'], ['tr', 'Top right'], ['tl', 'Top left']), when: (s) => s.floatPlayer !== false },
         { key: 'sidePanel', type: 'toggle', label: 'Show the "In this video" panel (chapters and transcript) beside the video' },
         { key: 'relatedChips', type: 'toggle', label: 'Filter chips above the suggested videos' },
@@ -249,7 +253,6 @@ const SCHEMA = {
       { title: 'Writing a comment', items: [
         { key: 'composerStyle', type: 'select', label: 'Comment box', options: opt(['expand', 'One line, opens when clicked (like YouTube)'], ['full', 'Always open'], ['hidden', 'Hidden']) },
         { key: 'composerSubmit', type: 'select', label: 'Send with', options: opt(['ctrl', 'Ctrl + Enter'], ['enter', 'Enter (Shift + Enter for a new line)'], ['button', 'The button only']) },
-        { key: 'composerConfirm', type: 'toggle', label: 'Ask before posting', hint: 'Comments are public, so this is on by default.' },
         { key: 'composerDrafts', type: 'toggle', label: 'Keep a draft for each video until I post it' },
         { key: 'composerCounter', type: 'toggle', label: 'Show a character counter' },
         { key: 'afterPost', type: 'select', label: 'After I post', options: opt(['newest', 'Show newest comments so I can see mine'], ['keep', 'Keep the current sorting']) },

@@ -14,7 +14,7 @@
   <div id="nav-btns"><button id="nav-back" title="Back (Alt+Left)" disabled><i data-ic="chevleft"></i></button><button id="nav-fwd" title="Forward (Alt+Right)" disabled><i data-ic="chevright"></i></button></div>
   <div id="logo" title="Home"><span class="logo-mark">▶</span><span class="logo-text">You<span class="tube">Tube</span></span></div>
   <div id="search-wrap">
-    <input id="search" placeholder="Search" autocomplete="off">
+    <input id="search" placeholder="Search" autocomplete="off" spellcheck="true">
     <button id="search-btn" title="Search"><i data-ic="search"></i></button>
     <ul id="suggest" hidden></ul>
   </div>
@@ -43,6 +43,7 @@
         <div id="sb-toast" hidden></div>
         <div id="mini-ui">
           <div class="mini-top"><span id="mini-title"></span><button id="mini-expand" title="Back to the video" aria-label="Back to the video"><i data-ic="fs"></i></button><button id="mini-close" title="Close the player" aria-label="Close the player"><i data-ic="x"></i></button></div>
+          <div id="mini-ask" hidden><b>Close the player?</b><span><button data-a="yes">Close</button><button data-a="no">Keep playing</button></span></div>
           <button id="mini-play" title="Play / pause" aria-label="Play or pause"></button>
           <button id="mini-next" title="Next video" aria-label="Next video"><i data-ic="next"></i></button>
           <div id="mini-bar"><div id="mini-fill"></div></div>

@@ -1589,7 +1589,6 @@ function openReplyBox(el, c) {
   ta.oninput = fit;
   const send = async () => {
     const text = ta.value.trim(); if (!text) return;
-    if (settings.composerConfirm !== false && !confirm(`Post this reply publicly?\n\n${text.slice(0, 300)}`)) return;
     post.disabled = true;
     try {
       await api.commentReply(c.id, text); box.hidden = true; toast('Reply posted');
@@ -1680,7 +1679,6 @@ async function postComment() {
   const ta = $('#c-input'); const text = (ta?.value || '').trim(); if (!text || !current) return;
   if (!signedIn()) return promptLogin('Sign in to comment.');
   const me = auth.accounts.find((x) => x.id === auth.active);
-  if (settings.composerConfirm !== false && !confirm(`Post this comment publicly${me ? ' as ' + me.name : ''}?\n\n${text.slice(0, 400)}${text.length > 400 ? '…' : ''}`)) return;
   const post = $('#c-post'); post.disabled = true;
   try {
     await api.postComment(current.id, text);
@@ -2700,7 +2698,7 @@ const floatOn = () => settings.floatPlayer !== false;
 const awayNow = () => $('#watch').classList.contains('away');
 function updateAway() {
   const w = $('#watch'), away = floatOn() && w.hidden && !!current;
-  w.classList.toggle('away', away);
+  w.classList.toggle('away', away); if (!away) miniAsk(false);
   document.body.classList.toggle('has-mini', away);
   document.documentElement.style.setProperty('--mini-w', ({ small: 300, medium: 380, large: 500 })[settings.floatSize || 'medium'] + 'px');
   for (const c of ['br', 'bl', 'tr', 'tl']) document.body.classList.toggle('mini-' + c, (settings.floatCorner || 'br') === c);
@@ -2721,7 +2719,10 @@ $('#mini-ui').addEventListener('click', (e) => {
   if (current) openVideo(current); // back to the video page, no reload
 });
 $('#mini-expand').onclick = () => { if (current) openVideo(current); };
-$('#mini-close').onclick = closePlayer;
+// The x asks first, right over the video, so a stray click does not stop what is playing.
+const miniAsk = (on) => { $('#mini-ask').hidden = !on; $('#mini-ui').classList.toggle('asking', on); };
+$('#mini-close').onclick = () => { if (settings.miniConfirmClose === false) closePlayer(); else miniAsk(true); };
+$('#mini-ask').addEventListener('click', (e) => { const a = e.target.closest('button')?.dataset.a; if (!a) return; e.stopPropagation(); miniAsk(false); if (a === 'yes') closePlayer(); });
 $('#mini-play').onclick = () => (video.paused ? video.play().catch(() => {}) : video.pause());
 for (const b of $('#mini-ui').querySelectorAll('button')) { b.tabIndex = -1; b.addEventListener('mousedown', (e) => e.preventDefault()); } // keep the keyboard shortcuts working after a click
 $('#mini-next').onclick = () => playNext(true);
@@ -2849,4 +2850,35 @@ document.addEventListener('keydown', (e) => {
 // Verbose logging: the player's own events, to find out why something stalled, skipped or went quiet.
 for (const ev of ['waiting', 'stalled', 'seeking', 'seeked', 'error', 'playing', 'pause', 'ended', 'ratechange', 'emptied', 'loadedmetadata']) video.addEventListener(ev, () => {
   if (settings.devVerbose || ev === 'error') dlog(ev === 'error' ? 'warn' : 'debug', 'video', ev, 't=' + (video.currentTime || 0).toFixed(1), 'ready=' + video.readyState, video.error ? 'code=' + video.error.code : '');
+});
+
+// ---------- correcting misspelled words as you type (comments, replies, search) ----------
+// Uses the built-in spell checker. A word it flags is replaced when you press space, but only if its first suggestion is a single slip away
+// (two letters swapped, one missing, one extra or one wrong), so it never rewrites a word into a different one. Ctrl+Z puts back what you typed.
+function editDist1(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) {
+    let d = [], i = 0; for (; i < a.length; i++) if (a[i] !== b[i]) d.push(i);
+    return d.length === 1 || (d.length === 2 && d[1] === d[0] + 1 && a[d[0]] === b[d[1]] && a[d[1]] === b[d[0]]);
+  }
+  const [s, l] = a.length < b.length ? [a, b] : [b, a]; let i = 0; while (i < s.length && s[i] === l[i]) i++;
+  return s.slice(i) === l.slice(i + 1);
+}
+const acTarget = (el) => el && (el.id === 'search' || el.id === 'c-input' || (el.tagName === 'TEXTAREA' && /^Reply/.test(el.placeholder || '')));
+function acFix(w) {
+  if (w.length < 3 || /^'|'$/.test(w)) return null;
+  const sug = api.spellSuggest(w), r = sug && (sug.find((x) => x.includes("'") && editDist1(w.toLowerCase(), x.toLowerCase())) || sug[0]); // dont -> don't, not font
+  if (!r || !/^[A-Za-z']+$/.test(r) || !editDist1(w.toLowerCase(), r.toLowerCase())) return null;
+  return w === w.toUpperCase() ? r.toUpperCase() : w[0] === w[0].toUpperCase() ? r[0].toUpperCase() + r.slice(1) : r;
+}
+document.addEventListener('beforeinput', (e) => {
+  const el = e.target;
+  if (settings.autocorrect === false || !acTarget(el) || e.inputType !== 'insertText' || e.data !== ' ' || el.selectionStart !== el.selectionEnd) return;
+  const pos = el.selectionStart, m = /([A-Za-z']+)$/.exec(el.value.slice(0, pos)); if (!m) return;
+  if (/[@#\/.:_\d-]/.test(el.value.slice(0, pos - m[1].length).slice(-1))) return; // handles, tags, links, paths, numbers
+  const fix = acFix(m[1]); if (!fix) return;
+  e.preventDefault();
+  el.setSelectionRange(pos - m[1].length, pos);
+  document.execCommand('insertText', false, fix + ' ');
 });

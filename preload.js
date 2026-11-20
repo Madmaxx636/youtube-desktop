@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('api', {
   quit: () => call('app:quit'),
   streamStats: () => call('dev:streamStats'),
   playerCheck: (id, o) => call('dev:playerCheck', id, o),
+  // The built-in spell checker (answers once its dictionary has been downloaded the first time).
+  spellSuggest: (w) => { try { return webFrame.isWordMisspelled(w) ? webFrame.getWordSuggestions(w) : null; } catch { return null; } },
   devLog: (since) => call('dev:log', since),
   devLogClear: () => call('dev:logClear'),
   devVerbose: (on) => call('dev:verbose', on),

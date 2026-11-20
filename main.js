@@ -1286,11 +1286,13 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: !HIDDEN },
   });
   win.loadFile('src/index.html');
+  try { const ss = win.webContents.session; if (!ss.getSpellCheckerLanguages().length) ss.setSpellCheckerLanguages(['en-US']); } catch {}
   win.webContents.on('context-menu', (_e, p) => {
     if (!p.isEditable && !p.selectionText) return;
     const f = p.editFlags;
+    const fix = p.isEditable && p.misspelledWord ? [...p.dictionarySuggestions.slice(0, 5).map((w) => ({ label: w, click: () => win.webContents.replaceMisspelling(w) })), ...(p.dictionarySuggestions.length ? [] : [{ label: 'No suggestions', enabled: false }]), { label: 'Add to dictionary', click: () => win.webContents.session.addWordToSpellCheckerDictionary(p.misspelledWord) }, { type: 'separator' }] : [];
     Menu.buildFromTemplate(p.isEditable
-      ? [{ role: 'cut', enabled: f.canCut }, { role: 'copy', enabled: f.canCopy }, { role: 'paste', enabled: f.canPaste }, { type: 'separator' }, { role: 'selectAll' }]
+      ? [...fix, { role: 'cut', enabled: f.canCut }, { role: 'copy', enabled: f.canCopy }, { role: 'paste', enabled: f.canPaste }, { type: 'separator' }, { role: 'selectAll' }]
       : [{ role: 'copy' }]).popup({ window: win });
   });
   win.on('minimize', () => { if (cfg().miniOnMinimize && playerPlaying && !mini) toggleMini(true); });

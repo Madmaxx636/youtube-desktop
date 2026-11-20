@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.6
+
+- Autocorrect: in comments, replies and the search box, a misspelled word is corrected when you press space ("teh" becomes "the", "recieve" becomes "receive", "dont" becomes "don't"). It only changes a word when the spell checker's first suggestion is a single slip away (two letters swapped, one missing, one extra or one wrong), and leaves names, @handles, #tags, links and numbers alone. Ctrl+Z puts back what you typed. Misspelled words are also underlined, and the right-click menu offers suggestions and "Add to dictionary". Settings, General, Typing turns it off. The spell checker downloads its English dictionary the first time the app runs, so it needs a connection once.
+- Floating player: the x now asks "Close the player?" over the video (Close or Keep playing), so a stray click does not stop what is playing. Settings, Mini player turns the question off.
+- Comments and replies are posted straight away, without the "Post this publicly?" confirmation. The "Ask before posting" setting is gone.
+
 ## 0.11.5
 
 - Fixed: videos you watch here now show as watched, with their progress, on YouTube on the web and on the phone. Cause: the signed-in player request the app made to get its tracking addresses was being refused by YouTube ("The page needs to be reloaded"), so the app silently fell back to the signed-out addresses, and YouTube never tied the views to your account. The TV player needs its own signature timestamp format (the usual five digits with 001 added) and a playback context, as SmartTube sends. With that, the request is accepted and the pings are recorded: in a test the video appeared at the top of the account's history with its progress.
