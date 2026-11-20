@@ -681,7 +681,9 @@ async function statsPing(i, url, client, params) {
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   const oauth = i.session.oauth;
   if (oauth.shouldRefreshToken()) await oauth.refreshAccessToken();
-  return fetch(u, { headers: { Authorization: `Bearer ${oauth.oauth2_tokens.access_token}`, 'User-Agent': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version' } });
+  const r = await fetch(u, { headers: { Authorization: `Bearer ${oauth.oauth2_tokens.access_token}`, 'User-Agent': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version' } });
+  if (HIDDEN) { (globalThis.__pingLog ||= []).push({ url: u.toString().replace(/(\?|&)(sdetail|ei|of|vm)=[^&]{12,}/g, '$1$2=…'), status: r.status, body: (await r.clone().text()).slice(0, 120) }); }
+  return r;
 }
 // ---------- resolving a video: details (youtubei) and stream addresses (yt-dlp), each asked once and remembered ----------
 const infoCache = new Map(), captionUrls = new Map(), resolveCache = new Map();
@@ -1098,9 +1100,14 @@ const handlers = {
     checkId(id);
     const i = await authed();
     const { Constants } = await import('youtubei.js'), tv = Constants?.CLIENTS?.TV || { NAME: 'TVHTML5', VERSION: '7.20260311.12.00' };
-    // The tracking addresses come from the normal (web) player response; the ping itself carries your signed-in session.
-    const info = await (await innertube()).getInfo(id);
-    const pt = info.page?.[0]?.playback_tracking || info.playback_tracking;
+    // The tracking addresses must come from a player request made while signed in, otherwise YouTube does not tie the view to your account.
+    let pt = null;
+    try {
+      const raw = await i.actions.execute('/player', { videoId: id, contentCheckOk: true, racyCheckOk: true, parse: false });
+      const t = (raw.data || raw).playbackTracking;
+      if (t?.videostatsPlaybackUrl?.baseUrl) pt = { videostats_playback_url: t.videostatsPlaybackUrl.baseUrl, videostats_watchtime_url: t.videostatsWatchtimeUrl?.baseUrl };
+    } catch {}
+    if (!pt?.videostats_playback_url) { const info = await (await innertube()).getInfo(id); pt = info.page?.[0]?.playback_tracking || info.playback_tracking; }
     if (!pt?.videostats_playback_url) throw new Error('YouTube gave no playback tracking for this video.');
     const cpn = crypto.randomBytes(12).toString('base64url').slice(0, 16), client = { name: tv.NAME, version: tv.VERSION };
     histInfos.set(id, { pt, cpn, client }); capMap(histInfos, 20);
@@ -1108,10 +1115,14 @@ const handlers = {
     if (!r.ok) throw new Error('YouTube answered ' + r.status);
     return true;
   },
-  async 'me:historyTime'(id, seconds) {
+  // mode: 'playing' (a regular report), 'paused', or 'final' (the video was left or ended). Each report covers the stretch watched since the last one.
+  async 'me:historyTime'(id, seconds, mode) {
     const h = histInfos.get(String(id)); if (!h?.pt?.videostats_watchtime_url) return false;
-    const t = Math.max(0, +seconds || 0).toFixed(3);
-    const r = await statsPing(await authed(), h.pt.videostats_watchtime_url, h.client, { cpn: h.cpn, st: t, et: t, cmt: t, final: '1' });
+    const t = Math.max(0, +seconds || 0), st = Math.min(h.last || 0, t);
+    const p = { cpn: h.cpn, st: st.toFixed(3), et: t.toFixed(3), cmt: t.toFixed(3), state: mode === 'paused' ? 'paused' : 'playing' };
+    if (mode === 'final') p.final = '1';
+    h.last = t;
+    const r = await statsPing(await authed(), h.pt.videostats_watchtime_url, h.client, p);
     return r.ok;
   },
   'update:check'() { return checkUpdate(true); },

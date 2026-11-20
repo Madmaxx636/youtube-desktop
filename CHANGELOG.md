@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.2
+
+- "In this video" panel: it now starts collapsed, showing only its header and the Chapters / Transcript tabs (Transcript appears whenever the video has captions, even if captions are not shown). Click a tab to open it. The X closes the panel and it stays gone for other videos until you restart the app.
+- Opening a half-watched video now continues where you left off. If this app has no saved position for the video (for example you watched it on your phone), it continues from the point YouTube says you reached. Positions under two seconds are ignored.
+- Watch history on YouTube: the pings now come from a signed-in player request and report real watched ranges (start and end of each stretch, playing or paused, and a final report when you leave), every 30 seconds instead of one zero-length report. YouTube accepts them (HTTP 204), but in testing with the signed-in account the video still did not appear in the account's history or progress list, so this is not confirmed to fix the watched marks on the web and phone. The sign-in this app uses (the TV-style login) may simply not be allowed to write watch history.
+
 ## 0.11.1
 
 - Fixed: the sound dropping out for good, after a long pause or after skipping ahead or back. Cause: the local stream cache forgot a stream's address after 20 minutes without a request, and the sound track is downloaded in the first few seconds and then not asked for again, so in a longer video (or after a long pause) its address was gone. The next skip needed the sound again, got "not found", and the sound stayed dead for the rest of the video while the picture carried on. Addresses now stay valid for six hours (only the cached data is freed when a stream has been idle), and a stream that is in the middle of being read is never cut off.

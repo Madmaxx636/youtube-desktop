@@ -1403,10 +1403,18 @@ async function openVideo(v, opts = {}) {
   $('#w-desc').classList.toggle('collapsed', !settings.descExpanded); $('#desc-toggle').textContent = settings.descExpanded ? 'Show less' : 'Show more'; $('#desc-toggle').hidden = true;
   speed = settings.rememberSpeed && settings.speed ? settings.speed : parseFloat(settings.defaultSpeed) || 1;
   if (!settings.pauseHistory) pushList('history', v); // marked watched later, once you have really watched most of it (see saveProgress)
-  capTracks = []; capLang = ''; setCaptionTrack(null); paintRc();
+  capTracks = []; allCapTracks = []; capLang = ''; setCaptionTrack(null); paintRc();
   updateChannelRow(); renderToolbar();
   // The stream (yt-dlp) and the details (youtubei) are looked up at the same time, and the details are shown as soon as they arrive.
-  const prog = lsGet('progress', {})[v.id], startAt = settings.resume && prog && prog.pct < 95 ? prog.t : 0;
+  const prog = lsGet('progress', {})[v.id];
+  let startAt = settings.resume && prog && prog.pct < 95 && prog.t > 2 ? prog.t : 0;
+  // Nothing saved here: continue from where YouTube says you stopped (it only gives a percentage, so work out the time from the length).
+  const ytPct = ytProg[v.id] || v.watchedPct || 0;
+  if (settings.resume && !startAt && ytPct >= 2 && ytPct < 95) {
+    const len = v.duration && /^\d+(:\d{2}){1,2}$/.test(v.duration) ? tsToSec(v.duration) : 0;
+    if (len) startAt = Math.max(0, Math.floor(len * ytPct / 100) - 2);
+    else video.addEventListener('loadedmetadata', () => { if (current?.id === v.id && video.currentTime < 1 && isFinite(video.duration)) { const t = Math.floor(video.duration * ytPct / 100) - 2; try { video.currentTime = t; if (audioActive) audio.currentTime = t; } catch {} } }, { once: true });
+  }
   const infoP = api.video(v.id).catch(() => null);
   loadStream(v.id, settings.quality || 'auto', startAt).catch((e) => { if (current?.id === v.id) { pbox.classList.remove('loading'); $('#w-stats').textContent = 'Could not load stream: ' + e.message; } });
   navigator.mediaSession && (navigator.mediaSession.metadata = new MediaMetadata({ title: v.title, artist: v.channel, artwork: v.thumb ? [{ src: v.thumb }] : [] }));
@@ -1746,7 +1754,7 @@ function setCaptionTrack(vtt) {
 function setCaptionTracks(list) {
   let l = list || [];
   if (settings.subAllowAuto === false) l = l.filter((t) => !t.auto);
-  capTracks = l; renderToolbar(); paintRc();
+  capTracks = l; allCapTracks = list || []; renderToolbar(); paintRc();
   const want = (settings.subLang || '').toLowerCase();
   const pref = want && (l.find((x) => x.lang.toLowerCase() === want && !x.auto) || l.find((x) => x.lang.toLowerCase() === want) || l.find((x) => x.lang.toLowerCase().startsWith(want)));
   if (settings.subDefaultOn && pref) chooseCaption(pref.lang + (pref.auto ? '|a' : '|m'));
@@ -2288,10 +2296,10 @@ video.addEventListener('playing', () => {
   histSent = current.id; histLastT = Date.now();
   api.historyStart(current.id).catch(histWarn);
 });
-const histTime = () => { if (current && histSent === current.id && histOn() && video.currentTime > 0) api.historyTime(current.id, video.currentTime).catch(() => {}); };
-video.addEventListener('pause', histTime);
-video.addEventListener('ended', histTime);
-video.addEventListener('timeupdate', () => { if (histSent === current?.id && Date.now() - histLastT > 60000) { histLastT = Date.now(); histTime(); } });
+const histTime = (mode) => { if (current && histSent === current.id && histOn() && video.currentTime > 0) api.historyTime(current.id, video.currentTime, typeof mode === 'string' ? mode : 'final').catch(() => {}); };
+video.addEventListener('pause', () => { if (!video.ended) histTime('paused'); });
+video.addEventListener('ended', () => histTime('final'));
+video.addEventListener('timeupdate', () => { if (histSent === current?.id && Date.now() - histLastT > 30000) { histLastT = Date.now(); histTime('playing'); } });
 window.addEventListener('beforeunload', histTime);
 
 // ---------- app updates ----------
@@ -2329,13 +2337,13 @@ api.updateState().then(paintUpdate).catch(() => {});
 
 // ---------- side panel: chapters and transcript ("In this video"), like YouTube ----------
 const chaptersSide = () => settings.chaptersPlace !== 'below' && settings.watchRelated !== 'hidden';
-let rcTab = 'chapters', rcOpen = true, rcDismissed = false, chapLoop = null, transcript = null, trIdx = -1;
+let rcTab = 'chapters', rcOpen = false, rcDismissed = false, allCapTracks = [], chapLoop = null, transcript = null, trIdx = -1;
 const vUrl = (t) => `https://www.youtube.com/watch?v=${current?.id}${t != null ? '&t=' + Math.floor(t) : ''}`;
 function setChapters(list) {
-  chapters = list; chapLoop = null; marksSig = ''; transcript = null; trIdx = -1; rcDismissed = false; lastChap = -1;
+  chapters = list; chapLoop = null; marksSig = ''; transcript = null; trIdx = -1; lastChap = -1; // (the panel stays closed with the X until the app is restarted)
   const box = $('#w-chapters'); box.hidden = true;
   if (list.length && !chaptersSide()) { box.hidden = false; chapOpen = false; paintChapters(); }
-  rcTab = list.length ? 'chapters' : 'transcript'; rcOpen = list.length > 0;
+  rcTab = list.length ? 'chapters' : 'transcript'; rcOpen = false; // collapsed: the header and the tabs; click a tab to open it
   paintRc(); paintBar();
 }
 function parseVttCues(vtt) {
@@ -2363,7 +2371,7 @@ async function loadTranscript() {
 }
 function paintRc() {
   const el = $('#rc-panel'); if (!el) return;
-  const hasCh = chapters.length > 0, hasTr = capTracks.length > 0;
+  const hasCh = chapters.length > 0, hasTr = allCapTracks.length > 0;
   const want = chaptersSide() && settings.sidePanel !== false && (hasCh || hasTr) && !rcDismissed && current;
   el.hidden = !want; if (!want) return;
   if (rcTab === 'chapters' && !hasCh) rcTab = 'transcript';
