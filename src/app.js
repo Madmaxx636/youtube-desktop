@@ -2172,7 +2172,8 @@ function showEndScreen() {
   if (settings.endScreen === false) return false;
   const list = endCandidates(); if (!list.length) return false;
   esList = list;
-  const es = $('#end-screen'), nx = nextVideo(), auto = !!nx && autoAllows(nx.kind), delay = Math.max(2, +settings.autoplayDelay || 8);
+  const es = $('#end-screen'), nx = nextVideo(), auto = !!nx && autoAllows(nx.kind), delay = settings.autoplayDelay === '0' || settings.autoplayDelay === 0 ? 0 : Math.max(2, +settings.autoplayDelay || 8);
+  if (auto && delay === 0) { playNext(); return true; } // no countdown: straight on to the next video
   es.innerHTML = `<div class="es-top"><div class="es-title">Up next</div>
       <div class="es-size" title="How many suggestions to show">${END_GRIDS.map(([k, l]) => `<button data-g="${k}">${l}</button>`).join('')}</div>
       <button id="es-replay">${ic('repeat')}Replay</button><button id="es-close" title="Close">${ic('x')}</button></div>

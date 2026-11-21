@@ -57,7 +57,7 @@ const SCHEMA = {
         { key: 'autoplayMode', type: 'select', label: 'Autoplay', options: opt(['endless', 'Endless: keep playing the suggested videos'], ['queue', 'Only when there is a queue or a playlist'], ['off', 'Off: stop after each video']), hint: 'Endless goes on into the next suggested video. The second option moves on only through your queue (tabs) or the playlist you started from, then stops.' },
         { key: 'endScreen', type: 'toggle', label: 'Show suggested videos when a video ends', hint: 'With autoplay on, a short countdown runs that you can cancel.' },
         { key: 'endGrid', type: 'select', label: 'Suggestions on the end screen', options: opt(['3x1', 'One row of 3 (like YouTube)'], ['2x2', '2 × 2'], ['3x3', '3 × 3'], ['4x4', '4 × 4']), hint: 'You can also switch on the end screen itself.', when: (s) => s.endScreen !== false },
-        { key: 'autoplayDelay', type: 'select', label: 'Countdown before the next video', options: opt(['3', '3 seconds'], ['5', '5 seconds'], ['8', '8 seconds'], ['12', '12 seconds'], ['20', '20 seconds']), when: (s) => s.endScreen !== false && s.autoplayMode !== 'off' },
+        { key: 'autoplayDelay', type: 'select', label: 'Countdown before the next video', options: opt(['0', 'None: start the next video right away'], ['3', '3 seconds'], ['5', '5 seconds'], ['8', '8 seconds'], ['12', '12 seconds'], ['20', '20 seconds']), when: (s) => s.endScreen !== false && s.autoplayMode !== 'off' },
         { key: 'resume', type: 'toggle', label: 'Resume where I left off' },
         { key: 'rememberVolume', type: 'toggle', label: 'Remember my volume and mute between sessions' },
         { key: 'rememberSpeed', type: 'toggle', label: 'Remember the speed I last used' },

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.7
+
+- New option to remove the countdown before the next video: Settings, Playback, "Countdown before the next video", "None: start the next video right away". With it, the next video starts as soon as one ends, with no countdown and no end screen. The other choices (3 to 20 seconds) work as before, and autoplay "Off" still stops after each video.
+
 ## 0.11.6
 
 - Autocorrect: in comments, replies and the search box, a misspelled word is corrected when you press space ("teh" becomes "the", "recieve" becomes "receive", "dont" becomes "don't"). It only changes a word when the spell checker's first suggestion is a single slip away (two letters swapped, one missing, one extra or one wrong), and leaves names, @handles, #tags, links and numbers alone. Ctrl+Z puts back what you typed. Misspelled words are also underlined, and the right-click menu offers suggestions and "Add to dictionary". Settings, General, Typing turns it off. The spell checker downloads its English dictionary the first time the app runs, so it needs a connection once.
