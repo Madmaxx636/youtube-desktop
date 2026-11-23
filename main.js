@@ -103,17 +103,18 @@ function tilesOf(data) {
   return out;
 }
 // Browse a TV page and follow its continuation token for a few more pages.
-async function tvPages(i, browseId, maxPages = 3) {
+async function tvPages(i, browseId, maxPages = 3, from = null) {
   const all = [], seen = new Set();
-  let res = await i.actions.execute('/browse', { browseId });
+  all.next = ''; // where the next page starts, when there is one (so a feed can be read further later)
+  let res = await i.actions.execute('/browse', from ? { continuation: from } : { browseId });
   for (let n = 0; ; n++) {
     // YouTube sometimes returns the same page again for a continuation; only keep tiles we have not seen.
     const fresh = tilesOf(res.data).filter((t) => { const k = t.contentId || rt(t.metadata?.tileMetadataRenderer?.title); if (!k || seen.has(k)) return false; seen.add(k); return true; });
     all.push(...fresh);
-    if (n > 0 && !fresh.length) break;
-    if (n + 1 >= maxPages) break;
+    if (n > 0 && !fresh.length) { all.next = ''; break; }
     const tok = /"nextContinuationData":\{"continuation":"([^"]+)"/.exec(JSON.stringify(res.data))?.[1];
-    if (!tok) break;
+    all.next = tok || '';
+    if (n + 1 >= maxPages || !tok) break;
     res = await i.actions.execute('/browse', { continuation: tok });
   }
   return all;
@@ -699,6 +700,7 @@ async function statsPing(i, url, client, params) {
   return r;
 }
 // ---------- resolving a video: details (youtubei) and stream addresses (yt-dlp), each asked once and remembered ----------
+const relInfos = new Map(); // the loaded video pages, kept so more suggested videos can be fetched from them
 const infoCache = new Map(), captionUrls = new Map(), resolveCache = new Map();
 let prefetching = 0;
 function videoInfo(id) {
@@ -709,6 +711,7 @@ function videoInfo(id) {
     const info = await i.getInfo(id);
     const b = info.basic_info;
     const related = collectVideos(info.watch_next_feed || []);
+    relInfos.set(id, info); if (relInfos.size > 8) relInfos.delete(relInfos.keys().next().value);
     const r = {
       id, title: b.title, channel: b.author, channelId: b.channel_id,
       views: b.view_count, likes: b.like_count, description: b.short_description,
@@ -998,11 +1001,16 @@ const handlers = {
   // ----- signed-in data -----
   async 'me:subs'() {
     const i = await authed();
-    const [vt, ct] = await Promise.all([tvPages(i, 'FEsubscriptions', 3), tvPages(i, 'FEchannels', 2).catch(() => [])]);
+    const [vt, ct] = await Promise.all([tvPages(i, 'FEsubscriptions', 5), tvPages(i, 'FEchannels', 2).catch(() => [])]);
     const channels = ct.map(tileChannel).filter(Boolean);
     const byName = new Map(channels.map((c) => [c.name, c.id]));
     const videos = tileVideos(vt).map((v) => ({ ...v, channelId: v.channelId || byName.get(v.channel) || '' }));
-    return { videos, channels };
+    return { videos, channels, next: vt.next };
+  },
+  // The next uploads in the subscriptions feed, from where the last load stopped.
+  async 'me:subs-more'(cursor) {
+    const i = await authed(), vt = await tvPages(i, 'FEsubscriptions', 4, String(cursor));
+    return { videos: tileVideos(vt), next: vt.next };
   },
   // YouTube's own resume positions for recently watched videos, so every thumbnail can show its progress bar.
   async 'me:progress'() { const i = await authed(); return tileVideos(await tvPages(i, 'FEhistory', 8)).filter((v) => v.watchedPct > 0).map((v) => ({ id: v.id, pct: v.watchedPct })); },
@@ -1092,6 +1100,12 @@ const handlers = {
     if (HIDDEN) return; if (/^https:\/\//.test(url)) shell.openExternal(url); },
   'app:mini'(on) { toggleMini(on); },
   // Diagnostics: how much each active stream has downloaded ahead in the local cache.
+  // The next page of suggested videos for a video that is open (the list that came with it is only about twenty).
+  async 'yt:related-more'(id) {
+    const info = relInfos.get(String(id)); if (!info) return { videos: [], done: true };
+    try { await info.getWatchNextContinuation(); } catch { return { videos: [], done: true }; }
+    return { videos: collectVideos(info.watch_next_feed || []), done: false };
+  },
   // Developer check: what the signed-in player answers for a video (read only, nothing is reported to YouTube).
   async 'dev:playerCheck'(id, o = {}) {
     checkId(id);

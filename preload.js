@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   relaunch: () => call('app:relaunch'),
   quit: () => call('app:quit'),
   streamStats: () => call('dev:streamStats'),
+  relatedMore: (id) => call('yt:related-more', id),
   playerCheck: (id, o) => call('dev:playerCheck', id, o),
   // The built-in spell checker (answers once its dictionary has been downloaded the first time).
   spellSuggest: (w) => { try { return webFrame.isWordMisspelled(w) ? webFrame.getWordSuggestions(w) : null; } catch { return null; } },
@@ -43,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   authSetChannel: (t, n) => call('auth:setChannel', t, n),
   onAuth: (cb) => ipcRenderer.on('auth', (_e, m) => cb(m)),
   meSubs: () => call('me:subs'),
+  meSubsMore: (c) => call('me:subs-more', c),
   meHistory: () => call('me:history'),
   mePlaylists: () => call('me:playlists'),
   rate: (id, k) => call('me:rate', id, k),

@@ -1012,3 +1012,6 @@ body.touch .np-row{padding:14px}
 #mini-ask span{display:flex;gap:8px}
 #mini-ui #mini-ask button{width:auto;height:auto;border-radius:18px;padding:7px 16px;font-size:13px;background:rgba(255,255,255,.16)}
 #mini-ui #mini-ask button[data-a=yes]{background:#cc0000}
+
+#rel-more{display:flex;justify-content:center;padding:10px 0 20px}
+#sb-more{display:flex;justify-content:center;padding:14px 0 28px}

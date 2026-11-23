@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.8
+
+- "In this video" panel: chapters are shown as soon as a video has them. The x collapses the panel to its header and tabs instead of removing it (click the x again, or a tab, to open it). Video pages without chapters keep the panel collapsed.
+- More suggested videos: the list beside the video used to stop at about twenty. It now fetches the next pages as you scroll to its end (up to six by itself), and a "Show more suggestions" button goes on after that. Data saver still shows a short list.
+- Subscriptions load more: the first load reads five pages of the feed instead of three, and the end of the list loads the next pages as you scroll (or press "Load more"). Without signing in, each channel now contributes up to 30 uploads instead of 15.
+
 ## 0.11.7
 
 - New option to remove the countdown before the next video: Settings, Playback, "Countdown before the next video", "None: start the next video right away". With it, the next video starts as soon as one ends, with no countdown and no end screen. The other choices (3 to 20 seconds) work as before, and autoplay "Off" still stops after each video.

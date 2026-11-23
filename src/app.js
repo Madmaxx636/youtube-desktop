@@ -887,7 +887,7 @@ async function fetchSubs() {
     for (const c of r.channels) chans[c.id] = c;
     const videos = r.videos.map((v) => { if (v.channelId && !chans[v.channelId]) chans[v.channelId] = { id: v.channelId, name: v.channel, avatar: v.channelThumb || '' }; return { ...v, age: ageDays(v.published) }; });
     remoteSubs = new Set(Object.keys(chans));
-    lsSet('subcache', { ts: Date.now(), videos, channels: chans });
+    lsSet('subcache', { ts: Date.now(), videos, channels: chans, next: r.next || '' });
     return;
   }
   const subs = lsGet('subs', {}), list = Object.values(subs), out = []; let i = 0;
@@ -898,7 +898,7 @@ async function fetchSubs() {
         const c = await api.channel(s.id);
         if (c.avatar && !s.avatar) subs[s.id].avatar = c.avatar;
         if (!s.name && c.name) subs[s.id].name = c.name;
-        for (const v of c.videos.slice(0, 15)) out.push({ ...v, channel: subs[s.id].name || c.name, channelId: s.id, age: ageDays(v.published) });
+        for (const v of c.videos.slice(0, 30)) out.push({ ...v, channel: subs[s.id].name || c.name, channelId: s.id, age: ageDays(v.published) });
       } catch {}
     }
   };
@@ -907,6 +907,7 @@ async function fetchSubs() {
   lsSet('subcache', { ts: Date.now(), videos: out });
 }
 async function showSubs(force) {
+  subsAuto = 0;
   navPush('subs', {}); view = 'subs'; showMain(); grid.hidden = true; $('#subbox').hidden = false; setStatus('');
   if (!signedIn() && !Object.keys(lsGet('subs', {})).length) {
     $('#subbox').innerHTML = '<div class="hint" style="padding:24px">No subscriptions yet. Subscribe from a video or channel page, or import a Google Takeout subscriptions.csv in Settings.</div>';
@@ -920,6 +921,25 @@ async function showSubs(force) {
     renderSideSubs();
     if (view === 'subs') renderSubs();
   }
+}
+// More uploads: the feed is read in pages, so the end of the list asks for the next one (the button does the same).
+let subsLoading = false, subsAuto = 0, subsObs = null;
+async function subsMore() {
+  const c = lsGet('subcache', { ts: 0, videos: [] });
+  if (!signedIn() || !c.next || subsLoading) return;
+  subsLoading = true; const b = $('#sb-more button'); if (b) b.textContent = 'Loading…';
+  try {
+    const r = await api.meSubsMore(c.next), chans = c.channels || {}, byName = new Map(Object.values(chans).map((x) => [x.name, x.id]));
+    const have = new Set(c.videos.map((v) => v.id)), fresh = [];
+    for (const v of r.videos) {
+      if (have.has(v.id)) continue; const channelId = v.channelId || byName.get(v.channel) || '';
+      if (channelId && !chans[channelId]) chans[channelId] = { id: channelId, name: v.channel, avatar: v.channelThumb || '' };
+      fresh.push({ ...v, channelId, age: ageDays(v.published) });
+    }
+    lsSet('subcache', { ...c, channels: chans, videos: c.videos.concat(fresh), next: fresh.length ? r.next || '' : '' });
+  } catch { lsSet('subcache', { ...c, next: '' }); }
+  finally { subsLoading = false; }
+  if (view === 'subs') { const sc = $('#main'), top = sc.scrollTop; renderSubBox(); sc.scrollTop = top; }
 }
 function subGroup(age) { return age < 1 ? 'Today' : age < 2 ? 'Yesterday' : age < 7 ? 'This week' : age < 30 ? 'This month' : 'Older'; }
 function renderSubBox() {
@@ -957,7 +977,14 @@ function renderSubBox() {
   $('#sb-refresh').onclick = () => showSubs(true);
 
   const listEl = $('#sb-list');
-  if (!vids.length) { listEl.innerHTML = `<div class="hint" style="padding:24px 0">${cache.ts ? 'Nothing new. Uncheck “Hide watched” to see everything.' : 'Loading uploads…'}</div>`; return; }
+  const moreBox = () => {
+    subsObs?.disconnect();
+    if (!signedIn() || !cache.next) return;
+    const m = document.createElement('div'); m.id = 'sb-more'; m.innerHTML = '<button class="link">Load more</button>'; m.querySelector('button').onclick = () => subsMore();
+    listEl.appendChild(m);
+    subsObs = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting) && subsAuto < 12) { subsAuto++; subsMore(); } }); subsObs.observe(m);
+  };
+  if (!vids.length) { listEl.innerHTML = `<div class="hint" style="padding:24px 0">${cache.ts ? 'Nothing new. Uncheck “Hide watched” to see everything.' : 'Loading uploads…'}</div>`; moreBox(); return; }
   const groups = new Map();
   for (const v of vids) { const g = subGroup(v.age); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(v); }
   for (const [g, items] of groups) {
@@ -970,6 +997,7 @@ function renderSubBox() {
       for (const v of items) listEl.appendChild(subRow(v, vids));
     }
   }
+  moreBox();
 }
 function subRow(v, queueList) {
   const el = document.createElement('div');
@@ -1441,7 +1469,7 @@ async function openVideo(v, opts = {}) {
   saveProgress(); histTime(); histSent = null; // keep where you left the previous video, and report it
   ++loadSeq; resetMedia(); video.poster = v.thumb || ''; pbox.classList.add('loading'); // stop the old one at once; the picture shows while the new one is found
   if (opts.list !== undefined) playlistCtx = opts.list; else if (!opts.keep) playlistCtx = null;
-  hideEndScreen(); relatedVids = []; relAll = []; $('#rc-chips').innerHTML = ''; setChapters([]);
+  hideEndScreen(); relatedVids = []; relAll = []; relDone = false; relPages = 0; $('#rc-chips').innerHTML = ''; setChapters([]);
   current = v; segments = []; streamRetries = 0;
   if (opts.stay) updateAway();
   if (!opts.stay) { $('#main').hidden = true; $('#watch').hidden = false; $('#watch').scrollTop = 0; $('#watch').classList.remove('away'); syncSideAuto(); }
@@ -2387,13 +2415,13 @@ api.updateState().then(paintUpdate).catch(() => {});
 
 // ---------- side panel: chapters and transcript ("In this video"), like YouTube ----------
 const chaptersSide = () => settings.sidePanel !== false; // chapters and transcript always live in the side panel (the "below the video" strip is only used when the panel is turned off)
-let chapTr = new Set(), rcTab = 'chapters', rcOpen = false, rcDismissed = false, allCapTracks = [], chapLoop = null, transcript = null, trIdx = -1;
+let chapTr = new Set(), rcTab = 'chapters', rcOpen = false, allCapTracks = [], chapLoop = null, transcript = null, trIdx = -1;
 const vUrl = (t) => `https://www.youtube.com/watch?v=${current?.id}${t != null ? '&t=' + Math.floor(t) : ''}`;
 function setChapters(list) {
   chapters = list; chapTr = new Set(); chapLoop = null; marksSig = ''; transcript = null; trIdx = -1; lastChap = -1; // (the panel stays closed with the X until the app is restarted)
   const box = $('#w-chapters'); box.hidden = true;
   if (list.length && !chaptersSide()) { box.hidden = false; chapOpen = false; paintChapters(); }
-  rcTab = list.length ? 'chapters' : 'transcript'; rcOpen = false; // collapsed: the header and the tabs; click a tab to open it
+  rcTab = list.length ? 'chapters' : 'transcript'; rcOpen = list.length > 0; // chapters are always shown; the x collapses the panel to its header and tabs (a tab opens it again)
   paintRc(); paintBar();
 }
 function parseVttCues(vtt) {
@@ -2422,11 +2450,11 @@ async function loadTranscript() {
 function paintRc() {
   const el = $('#rc-panel'); if (!el) return;
   const hasCh = chapters.length > 0, hasTr = allCapTracks.length > 0;
-  const want = chaptersSide() && settings.sidePanel !== false && (hasCh || hasTr) && !rcDismissed && current;
+  const want = chaptersSide() && settings.sidePanel !== false && (hasCh || hasTr) && current;
   el.hidden = !want; $('#watch').classList.toggle('rc-on', !!want); if (!want) return;
   if (rcTab === 'chapters' && !hasCh) rcTab = 'transcript';
   if (rcTab === 'transcript' && !hasTr) rcTab = 'chapters';
-  el.classList.toggle('closed', !rcOpen);
+  el.classList.toggle('closed', !rcOpen); $('#rc-x').title = rcOpen ? 'Collapse this panel' : 'Open this panel';
   for (const b of el.querySelectorAll('.rc-tabs button')) { const t = b.dataset.tab; b.hidden = (t === 'chapters' && !hasCh) || (t === 'transcript' && !hasTr); b.classList.toggle('on', rcOpen && t === rcTab); }
   const body = $('#rc-body'); body.hidden = !rcOpen; if (!rcOpen) return;
   const prevScroll = body.scrollTop;
@@ -2470,7 +2498,7 @@ function paintTranscriptNow(scroll) {
   const row = body.querySelector(`.tr-row[data-i="${k}"]`); if (!row) return; row.classList.add('cur');
   if (scroll || !body.matches(':hover')) body.scrollTop = Math.max(0, row.offsetTop - body.offsetTop - body.clientHeight / 3);
 }
-$('#rc-x').onclick = () => { rcDismissed = true; paintRc(); };
+$('#rc-x').onclick = () => { rcOpen = !rcOpen; paintRc(); };
 for (const b of document.querySelectorAll('#rc-panel .rc-tabs button')) b.onclick = () => { if (rcOpen && rcTab === b.dataset.tab) rcOpen = false; else { rcTab = b.dataset.tab; rcOpen = true; } paintRc(); };
 video.addEventListener('timeupdate', () => {
   if (chapLoop && video.currentTime >= chapLoop.b - 0.15) video.currentTime = chapLoop.a;
@@ -2487,7 +2515,20 @@ function paintChapLabel() {
 $('#pc-chap').onclick = (e) => { e.stopPropagation(); const m = $('#p-menu'); if (!m.hidden && pmPage === 'chapters') return closeP(); pmPage = 'chapters'; m.hidden = false; $('#p-gear').classList.add('open'); renderPMenu(); };
 
 // ---------- suggested videos with filter chips ----------
-let relAll = [], relChip = 'all';
+let relAll = [], relChip = 'all', relDone = false, relPages = 0, relLoading = false, relObs = null;
+// More suggested videos: the list that comes with a video is short, so the next pages are fetched as you scroll to the end (or press the button).
+async function relMore(manual) {
+  if (relLoading || relDone || !current) return;
+  const id = current.id; relLoading = true; const btn = $('#rel-more button'); if (btn) btn.textContent = 'Loading…';
+  try {
+    const r = await api.relatedMore(id); if (current?.id !== id) return;
+    const have = new Set(relAll.map((x) => x.id)), fresh = (r.videos || []).filter((x) => x.id && !have.has(x.id));
+    relPages++; if (r.done || !fresh.length) relDone = true;
+    if (fresh.length) { relAll = relAll.concat(fresh); relatedVids = relAll.filter((x) => !x.isShort); }
+  } catch { relDone = true; }
+  finally { relLoading = false; }
+  if (current?.id === id) paintRelated();
+}
 const durSec = (d) => { const p = String(d || '').split(':').map(Number); return p.some(Number.isNaN) ? 0 : p.reduce((a, x) => a * 60 + x, 0); };
 function relFilters() {
   const ch = current?.channelId, name = current?.channel || '';
@@ -2497,7 +2538,7 @@ function relFilters() {
   return defs;
 }
 function paintRelated() {
-  const rel = $('#related'), chips = $('#rc-chips'); rel.innerHTML = '';
+  const rel = $('#related'), chips = $('#rc-chips'); rel.innerHTML = ''; $('#rel-more')?.remove();
   const defs = relFilters();
   const counts = defs.map(([k, , f]) => [k, relAll.filter(f).length]);
   if (!counts.find(([k]) => k === relChip) || (relChip !== 'all' && !counts.find(([k, n]) => k === relChip && n))) relChip = 'all';
@@ -2509,6 +2550,13 @@ function paintRelated() {
   }
   const f = defs.find(([k]) => k === relChip)[2];
   renderVideos(perf.data ? relAll.filter(f).slice(0, 12) : relAll.filter(f), rel);
+  relObs?.disconnect();
+  if (!perf.data && relAll.length && !relDone) {
+    const more = document.createElement('div'); more.id = 'rel-more'; more.innerHTML = '<button class="link">Show more suggestions</button>';
+    more.querySelector('button').onclick = () => relMore(true); rel.after(more);
+    // keep loading while the end of the list is in view, up to a few pages by itself (the button goes on after that)
+    relObs = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting) && relPages < 6) relMore(); }); relObs.observe(more);
+  }
   renderUpNext();
 }
 
