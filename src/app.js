@@ -1513,7 +1513,7 @@ async function openVideo(v, opts = {}) {
     $('#w-desc-text').innerHTML = rich(info.description || '');
     $('#desc-toggle').hidden = $('#w-desc-text').scrollHeight < 72; // short descriptions need no toggle
     updateChannelRow(); renderToolbar(); applyStableAudio();
-    relAll = info.related; relChip = 'all'; paintRelated();
+    relAll = info.related; relChip = 'all'; paintRelated(); relFill();
     setChapters(info.chapters?.length ? info.chapters : parseChapters(info.description));
     relatedVids = info.related.filter((x) => !x.isShort);
     loadComments(v.id);
@@ -2515,20 +2515,26 @@ function paintChapLabel() {
 $('#pc-chap').onclick = (e) => { e.stopPropagation(); const m = $('#p-menu'); if (!m.hidden && pmPage === 'chapters') return closeP(); pmPage = 'chapters'; m.hidden = false; $('#p-gear').classList.add('open'); renderPMenu(); };
 
 // ---------- suggested videos with filter chips ----------
-let relAll = [], relChip = 'all', relDone = false, relPages = 0, relLoading = false, relObs = null;
-// More suggested videos: the list that comes with a video is short, so the next pages are fetched as you scroll to the end (or press the button).
-async function relMore(manual) {
-  if (relLoading || relDone || !current) return;
-  const id = current.id; relLoading = true; const btn = $('#rel-more button'); if (btn) btn.textContent = 'Loading…';
-  try {
-    const r = await api.relatedMore(id); if (current?.id !== id) return;
-    const have = new Set(relAll.map((x) => x.id)), fresh = (r.videos || []).filter((x) => x.id && !have.has(x.id));
-    relPages++; if (r.done || !fresh.length) relDone = true;
-    if (fresh.length) { relAll = relAll.concat(fresh); relatedVids = relAll.filter((x) => !x.isShort); }
-  } catch { relDone = true; }
-  finally { relLoading = false; }
-  if (current?.id === id) paintRelated();
+let relAll = [], relChip = 'all', relDone = false, relPages = 0;
+// The list that comes with a video is short (about twenty), so the next pages are fetched in the background until the chosen number is reached.
+async function relFill() {
+  const want = perf.data ? 0 : +settings.relatedCount || 60, id = current?.id;
+  while (id && current?.id === id && !relDone && relAll.length < want && relPages < 8) {
+    try {
+      const r = await api.relatedMore(id); if (current?.id !== id) return;
+      const have = new Set(relAll.map((x) => x.id)), fresh = (r.videos || []).filter((x) => x.id && !have.has(x.id));
+      relPages++; if (r.done || !fresh.length) relDone = true;
+      if (fresh.length) { relAll = relAll.concat(fresh); relatedVids = relAll.filter((x) => !x.isShort); paintRelated(); }
+    } catch { relDone = true; }
+  }
 }
+// An arrow at the end of the chips scrolls them when they do not all fit.
+function chipArrow() {
+  const c = $('#rc-chips'), b = $('#rc-chip-next'); if (!c || !b) return;
+  b.hidden = !(c.scrollWidth > c.clientWidth + c.scrollLeft + 4);
+}
+$('#rc-chip-next').onclick = () => { $('#rc-chips').scrollBy({ left: 220, behavior: 'smooth' }); };
+$('#rc-chips').addEventListener('scroll', chipArrow);
 const durSec = (d) => { const p = String(d || '').split(':').map(Number); return p.some(Number.isNaN) ? 0 : p.reduce((a, x) => a * 60 + x, 0); };
 function relFilters() {
   const ch = current?.channelId, name = current?.channel || '';
@@ -2538,7 +2544,7 @@ function relFilters() {
   return defs;
 }
 function paintRelated() {
-  const rel = $('#related'), chips = $('#rc-chips'); rel.innerHTML = ''; $('#rel-more')?.remove();
+  const rel = $('#related'), chips = $('#rc-chips'); rel.innerHTML = '';
   const defs = relFilters();
   const counts = defs.map(([k, , f]) => [k, relAll.filter(f).length]);
   if (!counts.find(([k]) => k === relChip) || (relChip !== 'all' && !counts.find(([k, n]) => k === relChip && n))) relChip = 'all';
@@ -2550,13 +2556,7 @@ function paintRelated() {
   }
   const f = defs.find(([k]) => k === relChip)[2];
   renderVideos(perf.data ? relAll.filter(f).slice(0, 12) : relAll.filter(f), rel);
-  relObs?.disconnect();
-  if (!perf.data && relAll.length && !relDone) {
-    const more = document.createElement('div'); more.id = 'rel-more'; more.innerHTML = '<button class="link">Show more suggestions</button>';
-    more.querySelector('button').onclick = () => relMore(true); rel.after(more);
-    // keep loading while the end of the list is in view, up to a few pages by itself (the button goes on after that)
-    relObs = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting) && relPages < 6) relMore(); }); relObs.observe(more);
-  }
+  chipArrow();
   renderUpNext();
 }
 

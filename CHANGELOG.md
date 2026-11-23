@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.9
+
+- Suggested videos are back to the plain list with the filter chips (no more "Show more suggestions" button or loading as you scroll), but with more results: after a video opens, the app fetches more pages in the background until it has about 60 (about 25 before). Settings, Layout, "Suggested videos to load" sets 20, 40, 60, 100 or 150. Data saver keeps the short list.
+- The filter chips get an arrow at the end that scrolls them when they do not all fit.
+
 ## 0.11.8
 
 - "In this video" panel: chapters are shown as soon as a video has them. The x collapses the panel to its header and tabs instead of removing it (click the x again, or a tab, to open it). Video pages without chapters keep the panel collapsed.
