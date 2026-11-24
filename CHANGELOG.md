@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.10
+
+- Bug reports are easy to find now. Settings, About has "Copy a bug report" and "Open the log folder" (and Settings, General, Advanced has a shortcut that opens About). The report has the app version, Electron and Chromium versions, your system, the yt-dlp version, whether you are signed in, your settings and the recent warnings and errors; home folder paths, IP addresses and tokens are removed. The hidden Developer tab (hold the app name in About for five seconds) is still there for the live log.
+- Warnings and errors are now written to a log file that is kept across restarts (`logs/youtube-desktop.log` in the app's data folder, about 2 MB at most), so a problem that closed the app can still be reported. It records errors from the app and from the page, the page's or another process's crashes and "stopped responding", and the sound and stream problems the player recovers from. The YouTube library's parser notes and Electron's deprecation notices are left out as noise.
+
 ## 0.11.9
 
 - Suggested videos are back to the plain list with the filter chips (no more "Show more suggestions" button or loading as you scroll), but with more results: after a video opens, the app fetches more pages in the background until it has about 60 (about 25 before). Settings, Layout, "Suggested videos to load" sets 20, 40, 60, 100 or 150. Data saver keeps the short list.

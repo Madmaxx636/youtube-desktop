@@ -5,7 +5,13 @@ function dlog(level, ...a) {
   const msg = a.map((x) => (x instanceof Error ? x.stack || x.message : typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })())).join(' ');
   // (the log can be copied and shared: no addresses, and long dumps are cut short)
   devBuf.push({ t: Date.now(), level, src: 'page', msg: scrub(msg) }); if (devBuf.length > 1000) devBuf.shift();
+  // warnings and errors also go to the log file (at most 30 a minute, so a loop cannot fill the disk)
+  if ((level === 'warn' || level === 'error') && window.api?.pageLog) {
+    const now = Date.now(); if (now - dlog.win > 60000) { dlog.win = now; dlog.n = 0; }
+    if (++dlog.n <= 30) api.pageLog(level, scrub(msg));
+  }
 }
+dlog.win = 0; dlog.n = 0;
 for (const k of ['log', 'info', 'warn', 'error']) { const o = console[k].bind(console); console[k] = (...a) => { dlog(k === 'log' ? 'info' : k, ...a); o(...a); }; }
 window.addEventListener('error', (e) => dlog('error', 'error:', e.message, (e.filename || '').split('/').pop() + ':' + e.lineno));
 window.addEventListener('unhandledrejection', (e) => dlog('error', 'unhandled rejection:', e.reason));
@@ -138,6 +144,7 @@ const ACTIONS = {
     await save({ ...D, toolbar: null, toolbarHidden: false, speed: 1, downloadDir: '' });
   },
   resetToolbar: () => save({ toolbar: null, toolbarHidden: false, menuActions: null }),
+  openAbout() { sTab = 'about'; renderSettings(); },
   copyDevLog() { const t = $('#dev-log')?.innerText; api.copy(t || ''); toast('Log copied'); },
   async clearDevLog() { devBuf.length = 0; mainLogT = 0; await api.devLogClear(); paintLogView(true); },
   async devOff() { await save({ devMode: false, devVerbose: false }); sTab = 'about'; renderSettings(); toast('Developer options off'); },
@@ -194,7 +201,11 @@ function settingRow(it) {
     case 'info': row.className = 'sinfo'; row.textContent = it.text; break;
     case 'about': {
       row.className = 'about-row';
-      row.innerHTML = `<div class="ab-name">YouTube Desktop</div><div class="ab-ver">Version …</div><div class="ab-note">A desktop client for YouTube.</div>`;
+      row.innerHTML = `<div class="ab-name">YouTube Desktop</div><div class="ab-ver">Version …</div><div class="ab-note">A desktop client for YouTube.</div>
+        <div class="ab-help"><button class="ab-copy">Copy a bug report</button><button class="ab-logs">Open the log folder</button></div>
+        <div class="ab-note">The report has the version, your system, your settings and the recent warnings and errors. It has no passwords, sign-in tokens or IP addresses.</div>`;
+      row.querySelector('.ab-copy').onclick = async () => { try { const t = await api.report(); const pg = devBuf.slice(-80).map((l) => `${new Date(l.t).toTimeString().slice(0, 8)} ${l.level.toUpperCase()} page ${l.msg}`).join('\n'); api.copy(t + '\n\n--- page, recent ---\n' + pg); toast('Bug report copied. Paste it where you report the problem.'); } catch (e) { toast('Could not make the report: ' + e.message); } };
+      row.querySelector('.ab-logs').onclick = () => api.openLogs().then((ok) => { if (!ok) toast('The log folder could not be opened.'); }).catch(() => toast('The log folder could not be opened.'));
       api.updateState().then((u) => { row.querySelector('.ab-ver').textContent = 'Version ' + (u.current || ''); }).catch(() => {});
       // Like Android's build number: press and hold the name for five seconds to unlock the developer options.
       let tm = 0; const nm = row.querySelector('.ab-name'), stop = () => { clearTimeout(tm); nm.classList.remove('holding'); };
@@ -1305,7 +1316,7 @@ let audio = newAudio(), audioUrl = '';
 let audioActive = false, audioGo = false, audioArm = null, loadSeq = 0, lastHardSeek = 0;
 // A short record of anything that went wrong with the sound or the stream (Settings, Video & audio, "Copy the playback log").
 const mlogBuf = [];
-function mlog(...a) { dlog('warn', 'playback:', ...a); mlogBuf.push(new Date().toTimeString().slice(0, 8) + ' ' + a.join(' ')); if (mlogBuf.length > 80) mlogBuf.shift(); }
+function mlog(...a) { const m = a.join(' '); dlog(/fail|error|dead|stuck|lost|reconnect|restart|stall|drop|cannot|could not|gave up|replac/i.test(m) ? 'warn' : 'info', 'playback:', ...a); mlogBuf.push(new Date().toTimeString().slice(0, 8) + ' ' + a.join(' ')); if (mlogBuf.length > 80) mlogBuf.shift(); }
 // The stream itself dropped (an address that expired, the cache entry gone, a network error): look the video up again and carry on from the
 // same spot. A few tries, then give up rather than loop.
 const reconnects = { n: 0, t: 0 };

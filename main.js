@@ -13,10 +13,30 @@ const HIDDEN = !!process.env.YT_TEST_HIDDEN;
 const logRing = []; let devVerbose = false;
 const fmtLog = (a) => a.map((x) => (x instanceof Error ? x.stack || x.message : typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })())).join(' ');
 const scrub = (t) => t.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]').replace(/([?&](?:ip|key|sig|signature|token|access_token|authorization)=)[^&\s"]+/gi, '$1…').slice(0, 400) + (t.length > 400 ? ' …' : '');
-function dlog(level, ...a) { logRing.push({ t: Date.now(), level, src: 'main', msg: scrub(fmtLog(a)) }); if (logRing.length > 1000) logRing.shift(); }
+// Warnings and errors are also written to a file in the app's data folder (kept across restarts, about 2 MB at most), so a problem
+// that closed the app or happened last week can still be reported.
+const LOG_DIR = path.join(app.getPath('userData'), 'logs'), LOG_FILE = path.join(LOG_DIR, 'youtube-desktop.log');
+let logBytes = 0;
+function persist(line) {
+  if (HIDDEN && !process.env.YT_TEST_LOG) return;
+  try {
+    if (!logBytes) { fs.mkdirSync(LOG_DIR, { recursive: true }); try { logBytes = fs.statSync(LOG_FILE).size; } catch { logBytes = 1; } }
+    if (logBytes > 1024 * 1024) { try { fs.renameSync(LOG_FILE, LOG_FILE + '.1'); } catch {} logBytes = 1; }
+    fs.appendFile(LOG_FILE, line + '\n', () => {}); logBytes += line.length + 1;
+  } catch {}
+}
+const stamp = (t) => new Date(t).toISOString().replace('T', ' ').slice(0, 19);
+function dlog(level, ...a) {
+  const e = { t: Date.now(), level, src: 'main', msg: scrub(fmtLog(a)) };
+  logRing.push(e); if (logRing.length > 1000) logRing.shift();
+  // (the YouTube library's parser notes and Electron's deprecation notices are noise, not problems)
+  if ((level === 'warn' || level === 'error') && !/^\[YOUTUBEJS\]|^\(electron\) /.test(e.msg)) persist(`${stamp(e.t)} ${level.toUpperCase()} main ${e.msg}`);
+}
 for (const k of ['log', 'info', 'warn', 'error']) { const o = console[k].bind(console); console[k] = (...a) => { dlog(k === 'log' ? 'info' : k, ...a); o(...a); }; }
 process.on('uncaughtExceptionMonitor', (e) => dlog('error', 'uncaught exception:', e));
 process.on('unhandledRejection', (e) => dlog('error', 'unhandled rejection:', e));
+app.on('child-process-gone', (_e, d) => dlog('error', `${d.type} process gone: ${d.reason} (exit ${d.exitCode})`));
+persist(`${stamp(Date.now())} ---- started ----`);
 const showWin = (w) => { if (!HIDDEN && w && !w.isDestroyed()) w.show(); };
 const jobs = new Map();
 let playerPlaying = false;
@@ -1118,6 +1138,32 @@ const handlers = {
     const d = raw.data || raw;
     return { status: d.playabilityStatus?.status, reason: d.playabilityStatus?.reason || '', streams: !!d.streamingData, tracking: Object.keys(d.playbackTracking || {}), sts: i.session.player?.signature_timestamp || 0 };
   },
+  // What the page logs as a warning or error is kept in the same file.
+  'dev:pageLog'(level, msg) { const l = level === 'error' ? 'error' : 'warn'; persist(`${stamp(Date.now())} ${l.toUpperCase()} page ${scrub(String(msg))}`); return true; },
+  'app:openLogs'() { if (HIDDEN) return false; fs.mkdirSync(LOG_DIR, { recursive: true }); shell.openPath(LOG_DIR); return true; },
+  // A text report to paste into a bug report: versions, system, settings and the recent warnings and errors. No tokens or passwords.
+  async 'app:report'() {
+    const os = require('os'), home = os.homedir();
+    const hide = (t) => String(t).split(home).join('~');
+    let ytv = 'not found';
+    try { ytv = (await new Promise((res, rej) => execFile(YTDLP, ['--version'], { timeout: 5000 }, (e, o) => (e ? rej(e) : res(o))))).trim(); } catch {}
+    let fileTail = '';
+    try { const b = fs.readFileSync(LOG_FILE, 'utf8'); fileTail = b.slice(-60000).split('\n').slice(-250).join('\n'); } catch { fileTail = '(no log file yet)'; }
+    const st = store.read(), signed = !!acc.read().active;
+    const lines = [
+      'YouTube Desktop bug report',
+      `Version: ${thisVersion()}${isDeb() ? ' (deb)' : ''}`,
+      `Electron ${process.versions.electron}, Chromium ${process.versions.chrome}, Node ${process.versions.node}`,
+      `System: ${os.type()} ${os.release()} ${os.arch()}, session ${process.env.XDG_SESSION_TYPE || 'n/a'}, ${Math.round(os.totalmem() / 1048576)} MB RAM`,
+      `yt-dlp: ${ytv}`,
+      `Signed in: ${signed ? 'yes' : 'no'}`,
+      `Playing: ${playerPlaying ? 'yes' : 'no'}`,
+      '', '--- settings (changed from the defaults are all listed) ---', hide(JSON.stringify(st)),
+      '', '--- log file (warnings and errors, newest last) ---', hide(fileTail),
+      '', '--- this session, recent (all levels) ---', hide(logRing.slice(-120).map((l) => `${stamp(l.t)} ${l.level.toUpperCase()} ${l.src} ${l.msg}`).join('\n')),
+    ];
+    return lines.join('\n');
+  },
   'dev:log'(since) { return logRing.filter((l) => l.t > (+since || 0)); },
   'dev:logClear'() { logRing.length = 0; return true; },
   'dev:verbose'(on) { devVerbose = !!on; dlog('info', 'verbose logging ' + (devVerbose ? 'on' : 'off')); return true; },
@@ -1301,6 +1347,8 @@ function createWindow() {
   });
   win.loadFile('src/index.html');
   try { const ss = win.webContents.session; if (!ss.getSpellCheckerLanguages().length) ss.setSpellCheckerLanguages(['en-US']); } catch {}
+  win.webContents.on('render-process-gone', (_e, d) => dlog('error', `page process gone: ${d.reason} (exit ${d.exitCode})`));
+  win.on('unresponsive', () => dlog('error', 'the window stopped responding'));
   win.webContents.on('context-menu', (_e, p) => {
     if (!p.isEditable && !p.selectionText) return;
     const f = p.editFlags;

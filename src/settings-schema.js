@@ -44,6 +44,7 @@ const SCHEMA = {
       { title: 'Advanced', items: [
         { key: 'windowSystem', type: 'select', label: 'Window system', options: opt(['auto', 'Automatic'], ['x11', 'X11 (XWayland)']), hint: 'On Linux with Wayland, apps cannot choose where their windows appear or keep them on top. X11 restores both for the mini player. Needs a restart.' },
         { type: 'button', label: 'Restart the app now', action: 'relaunch' },
+        { type: 'button', label: 'Report a problem: copy a bug report (opens About)', action: 'openAbout' },
       ] },
       { title: 'Updates', items: [
         { key: 'autoUpdateCheck', type: 'toggle', label: 'Check for new versions automatically', hint: 'Looks at this app\'s GitHub releases when it starts and every few hours. Nothing is installed without your OK.' },

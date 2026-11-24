@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('api', {
   // The built-in spell checker (answers once its dictionary has been downloaded the first time).
   spellSuggest: (w) => { try { return webFrame.isWordMisspelled(w) ? webFrame.getWordSuggestions(w) : null; } catch { return null; } },
   devLog: (since) => call('dev:log', since),
+  pageLog: (level, msg) => call('dev:pageLog', level, msg).catch(() => {}),
+  report: () => call('app:report'),
+  openLogs: () => call('app:openLogs'),
   devLogClear: () => call('dev:logClear'),
   devVerbose: (on) => call('dev:verbose', on),
   session: process.env.XDG_SESSION_TYPE || '',

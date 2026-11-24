@@ -1020,3 +1020,5 @@ body.touch .np-row{padding:14px}
 #rc-chip-next{position:absolute;right:0;top:0;bottom:0;width:44px;display:flex;align-items:center;justify-content:flex-end;padding:0 4px;border-radius:0;background:linear-gradient(90deg,transparent,var(--bg) 55%)}
 #rc-chip-next[hidden]{display:none}
 #rc-chip-next .ico{width:20px;height:20px}
+
+.ab-help{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
