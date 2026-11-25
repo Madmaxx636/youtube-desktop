@@ -23,7 +23,7 @@ const SCHEMA = {
     watchRelated: 'side', theater: false, commentsHidden: false, descExpanded: false, showDislikes: true,
     subsView: 'grouped', subsGroupBy: 'date', subsHideWatched: true, subsSort: 'new', subsLayout: 'list',
     sponsorblock: true, sbc_sponsor: true, sbc_selfpromo: true, sbc_interaction: true, sbc_intro: true, sbc_outro: true, sbc_preview: false, sbc_music_offtopic: false, sbc_filler: false,
-    dearrow: true, ryd: true, pauseHistory: false, autocorrect: true, miniConfirmClose: true, devMode: false, devVerbose: false,
+    dearrow: true, ryd: true, pauseHistory: false, cookiesBrowser: 'none', cookiesFile: '', autocorrect: true, miniConfirmClose: true, devMode: false, devVerbose: false,
   },
   tabs: [
     { id: 'general', label: 'General', groups: [
@@ -83,7 +83,12 @@ const SCHEMA = {
         { key: 'bufferSeconds', type: 'select', label: 'Buffer ahead', options: opt(['15', '15 seconds'], ['30', '30 seconds'], ['60', '1 minute'], ['120', '2 minutes'], ['180', '3 minutes'], ['300', '5 minutes'], ['600', '10 minutes'], ['1200', '20 minutes'], ['1800', '30 minutes']), when: (s) => s.bufferProxy !== false, hint: 'More buffer uses more memory (a few hundred MB for 4K at 5 minutes). Applies to the next video.' },
         { key: 'bufferMaxMB', type: 'select', label: 'Most the buffer may hold', options: opt(['256', '256 MB'], ['512', '512 MB'], ['1024', '1 GB'], ['2048', '2 GB'], ['4096', '4 GB']), hint: 'Big buffers are kept in a temporary folder on disk (emptied when you quit), so memory stays low. A few minutes of 4K is about a gigabyte.', when: (s) => s.bufferProxy !== false },
       ] },
+      { title: 'Sign-in cookies', hint: 'Only needed when YouTube answers "Sign in to confirm you are not a bot". yt-dlp then uses the YouTube sign-in of a browser on this computer (read when a video is looked up, never stored or sent anywhere else). Without it such videos play at 360p or not at all.', items: [
+        { key: 'cookiesBrowser', type: 'select', label: 'Take the sign-in from this browser', options: opt(['none', 'None'], ['firefox', 'Firefox'], ['chrome', 'Chrome'], ['chromium', 'Chromium'], ['brave', 'Brave'], ['edge', 'Edge'], ['vivaldi', 'Vivaldi'], ['opera', 'Opera']) },
+        { key: 'cookiesFile', type: 'text', label: 'Or a cookies.txt file', hint: 'Full path to a file exported from a browser (Netscape format). Used instead of the browser above.' },
+      ] },
       { title: 'Troubleshooting', items: [
+        { type: 'button', label: 'Update yt-dlp now (the program that finds the video streams; YouTube changes often)', action: 'updateYtdlp' },
         { type: 'button', label: 'Copy the playback log (what went wrong with the sound or the stream, for bug reports)', action: 'copyMediaLog' },
       ] },
       { title: 'Audio', items: [

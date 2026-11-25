@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.11
+
+- "Sign in to confirm you're not a bot" no longer ends in a raw error. Cause of the report: YouTube changed what it asks of yt-dlp, and an older yt-dlp (2026.10.26) got that answer for every video. Updating yt-dlp to 2026.11.23 fixed it here, and now the app can do that itself: Settings, Video & audio, Troubleshooting, "Update yt-dlp now" (only for a copy that can replace itself, such as the one in ~/.local/bin or the Windows app's own; a package-manager copy is updated with the system).
+- If YouTube still wants a sign-in for a video, the app asks as the Android app does, which still gives one plain 360p stream, and says so ("YouTube asked for a sign-in, so this plays at 360p"). If even that fails, the error now says what to do instead of printing yt-dlp's message.
+- New Settings, Video & audio, "Sign-in cookies": choose the browser you are signed in to YouTube with (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi, Opera), or a cookies.txt file, and yt-dlp uses that sign-in for lookups, subtitles and downloads. Off by default. (In my test the cookies alone did not help with this change; the yt-dlp update did.)
+- Toasts can stay longer than 3.5 seconds.
+
 ## 0.11.10
 
 - Bug reports are easy to find now. Settings, About has "Copy a bug report" and "Open the log folder" (and Settings, General, Advanced has a shortcut that opens About). The report has the app version, Electron and Chromium versions, your system, the yt-dlp version, whether you are signed in, your settings and the recent warnings and errors; home folder paths, IP addresses and tokens are removed. The hidden Developer tab (hold the app name in About for five seconds) is still there for the live log.

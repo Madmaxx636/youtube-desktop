@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('api', {
   devLog: (since) => call('dev:log', since),
   pageLog: (level, msg) => call('dev:pageLog', level, msg).catch(() => {}),
   report: () => call('app:report'),
+  updateYtdlp: () => call('app:updateYtdlp'),
   openLogs: () => call('app:openLogs'),
   devLogClear: () => call('dev:logClear'),
   devVerbose: (on) => call('dev:verbose', on),

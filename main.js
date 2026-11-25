@@ -266,9 +266,18 @@ function collectPlaylists(nodes, out = []) {
   return out;
 }
 
+// YouTube sometimes asks for proof that the request is not from a bot ("Sign in to confirm you're not a bot"). yt-dlp can take your
+// browser's YouTube sign-in (cookies) for that; Settings, Video & audio says which browser, or a cookies.txt file.
+function cookieArgs() {
+  const c = store.read(), file = String(c.cookiesFile || '').trim(), b = String(c.cookiesBrowser || 'none');
+  if (file && fs.existsSync(file)) return ['--cookies', file];
+  if (/^(firefox|chrome|chromium|brave|edge|vivaldi|opera|safari)$/.test(b)) return ['--cookies-from-browser', b];
+  return [];
+}
+const BOT_RE = /confirm you.?re not a bot|sign in to confirm|Please sign in/i;
 function ytdlp(args) {
   return new Promise((resolve, reject) => {
-    execFile(YTDLP, ['--no-warnings', '--no-update', ...args], { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(YTDLP, ['--no-warnings', '--no-update', ...cookieArgs(), ...args], { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message)); else resolve(stdout);
     });
   });
@@ -374,7 +383,7 @@ function downloadArgs(kind, o = {}, { playlist = false } = {}) {
 // One job runner for single videos and whole playlists: progress, final file path, cancel.
 function runJob(key, url, args, { playlist = false } = {}) {
   if (jobs.has(key)) throw new Error('That download is already running.');
-  const p = spawn(YTDLP, [...args, playlist ? '--yes-playlist' : '--no-playlist', url]);
+  const p = spawn(YTDLP, [...cookieArgs(), ...args, playlist ? '--yes-playlist' : '--no-playlist', url]);
   jobs.set(key, p);
   let item = 0, total = 0, pct = 0, file = '', errText = '';
   const send = (x) => win?.webContents.send('download-progress', { id: key, item, total, pct, file, ...x });
@@ -777,7 +786,14 @@ function resolveVideo(id, quality, perf, safe) {
   const args = ['-g', '-f', streamFormat(q, c, perf), ...(safe || perf.data || perf.power ? [] : sortArgs(c)), '--no-playlist', `https://www.youtube.com/watch?v=${id}`];
   // Skipping yt-dlp's HLS lookup saves most of a second; the plain https formats are the ones used anyway. Live streams and the
   // odd video that only has HLS fail that way, so those are asked again the full way.
-  const p = ytdlp(['--extractor-args', 'youtube:skip=hls', ...args]).catch(() => ytdlp(args)).then((out) => { const lines = out.trim().split('\n').filter(Boolean); if (!lines.length) throw new Error('No playable stream found.'); return { lines }; });
+  const full = ytdlp(['--extractor-args', 'youtube:skip=hls', ...args]).catch(() => ytdlp(args));
+  // If YouTube wants a sign-in for this video, ask as the Android app does: it still hands out one plain 360p stream, and the
+  // reason is passed on so the page can say how to get full quality (cookies).
+  const lowQ = (e) => ytdlp(['--extractor-args', 'youtube:player_client=android', '-g', '-f', 'b', '--no-playlist', `https://www.youtube.com/watch?v=${id}`])
+    .then((out) => ({ out, limited: true }), () => { throw e; });
+  const p = full.then((out) => ({ out, limited: false }), (e) => (BOT_RE.test(String(e.message)) ? lowQ(e) : Promise.reject(e)))
+    .then(({ out, limited }) => { const lines = out.trim().split('\n').filter(Boolean); if (!lines.length) throw new Error('No playable stream found.'); return { lines, limited }; },
+      (e) => { throw new Error(BOT_RE.test(String(e.message)) ? 'YouTube is asking this computer to prove it is not a bot, and this video has no stream without that. In Settings, Video & audio: first try "Update yt-dlp now" (Troubleshooting), then choose the browser you are signed in to YouTube with (Sign-in cookies).' : e.message); });
   resolveCache.set(key, { p, at: Date.now() }); capMap(resolveCache, 24);
   p.catch(() => resolveCache.delete(key));
   return p;
@@ -948,8 +964,9 @@ const handlers = {
     const r = await resolveVideo(id, q, perf, safe), lines = r.lines;
     const force = forceProxy || (c.stableAudio && c.stableAudio !== 'off');
     const px = async (u, i) => (r.warm && takeWarm(r.warm[i])) || proxied(u, force);
-    if (q === 'audio') return { video: null, audio: await px(lines[0], 0) };
-    return lines.length > 1 ? { video: await px(lines[0], 0), audio: await px(lines[1], 1) } : { video: await px(lines[0], 0), audio: null };
+    const lim = !!r.limited;   // YouTube asked for a sign-in, so this is the plain 360p stream
+    if (q === 'audio') return { video: null, audio: await px(lines[0], 0), limited: lim };
+    return lines.length > 1 ? { video: await px(lines[0], 0), audio: await px(lines[1], 1), limited: lim } : { video: await px(lines[0], 0), audio: null, limited: lim };
   },
   'yt:download'(id, kind, opts) {
     checkId(id);
@@ -1163,6 +1180,18 @@ const handlers = {
       '', '--- this session, recent (all levels) ---', hide(logRing.slice(-120).map((l) => `${stamp(l.t)} ${l.level.toUpperCase()} ${l.src} ${l.msg}`).join('\n')),
     ];
     return lines.join('\n');
+  },
+  // Updates yt-dlp itself (YouTube changes often and an old copy stops finding streams). Only a copy that can replace itself: the one
+  // in ~/.local/bin or next to the Windows app; a distro package has to be updated with the system.
+  async 'app:updateYtdlp'() {
+    const before = await new Promise((res) => execFile(YTDLP, ['--version'], { timeout: 8000 }, (e, o) => res(e ? '?' : o.trim())));
+    const out = await new Promise((res) => execFile(YTDLP, ['-U'], { timeout: 120000 }, (e, o, se) => res((o || '') + (se || '') + (e && !o ? e.message : ''))));
+    const after = await new Promise((res) => execFile(YTDLP, ['--version'], { timeout: 8000 }, (e, o) => res(e ? '?' : o.trim())));
+    resolveCache.clear();
+    if (after !== before) return `Updated yt-dlp: ${before} to ${after}.`;
+    if (/up to date|latest/i.test(out)) return `yt-dlp ${after} is the latest version.`;
+    if (/package manager|apt|pacman|dnf|snap|pip/i.test(out)) return `yt-dlp ${after} came from a package manager; update it there (or install the official build in ~/.local/bin).`;
+    return `yt-dlp ${after}: ${out.trim().split('\n').pop().slice(0, 160)}`;
   },
   'dev:log'(since) { return logRing.filter((l) => l.t > (+since || 0)); },
   'dev:logClear'() { logRing.length = 0; return true; },

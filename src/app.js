@@ -144,6 +144,7 @@ const ACTIONS = {
     await save({ ...D, toolbar: null, toolbarHidden: false, speed: 1, downloadDir: '' });
   },
   resetToolbar: () => save({ toolbar: null, toolbarHidden: false, menuActions: null }),
+  async updateYtdlp() { toast('Updating yt-dlp…', 20000); try { toast(await api.updateYtdlp(), 8000); } catch (e) { toast('Update failed: ' + e.message, 8000); } },
   openAbout() { sTab = 'about'; renderSettings(); },
   copyDevLog() { const t = $('#dev-log')?.innerText; api.copy(t || ''); toast('Log copied'); },
   async clearDevLog() { devBuf.length = 0; mainLogT = 0; await api.devLogClear(); paintLogView(true); },
@@ -1159,9 +1160,9 @@ async function setSub(ch, forceOn) {
   lsSet('subcache', { ts: 0, videos: [] });
   renderSideSubs();
 }
-function toast(msg) {
+function toast(msg, ms = 3500) {
   const t = $('#watch').hidden ? $('#gtoast') : $('#sb-toast'); // over the video while watching, otherwise at the bottom of the window
-  t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), 3500);
+  t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), ms);
 }
 function pushList(key, v, max = 300) {
   const l = lsGet(key, []).filter((x) => x.id !== v.id);
@@ -1404,6 +1405,7 @@ const mediaReady = (el) => (el.readyState >= 3 ? Promise.resolve() : new Promise
 async function loadStream(id, quality, startAt, safe) {
   const my = ++loadSeq;
   const s = await api.stream(id, quality, !!sa.ctx || (settings.stableAudio || 'off') !== 'off', !!safe, { data: perf.data, power: perf.power });
+  if (s.limited && current?.id === id) toast('YouTube asked for a sign-in, so this plays at 360p. For full quality choose your browser under Settings, Video & audio, Sign-in cookies.', 9000);
   if (my !== loadSeq || !current || current.id !== id) return; // another video was opened while this one was being looked up
   resetMedia();
   // Streams through the local cache are readable by Web Audio; direct ones are not (and the attribute would stop them loading).
