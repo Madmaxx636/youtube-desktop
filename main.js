@@ -114,6 +114,10 @@ async function whoami(i) {
   } catch { return { name: 'Google account', avatar: '' }; }
 }
 
+// Streams from the signed-in TV client, with its own proof-of-origin token (SmartTube's way): the fallback when yt-dlp is turned away.
+const tvStream = require('./tvstream.js')({ authed: () => authed(), electron: require('electron'), cfg: () => cfg(), dlog: (...a) => dlog(...a), onStale: () => resetSession() });
+if (HIDDEN) { globalThis.__tv = tvStream; globalThis.__authed = () => authed(); }
+
 // ---------- TV-client responses (subscriptions, history, playlists, personalized home) ----------
 const rt = (x) => x?.simpleText ?? (x?.runs || []).map((r) => r.text).join('');
 function tilesOf(data) {
@@ -487,7 +491,7 @@ async function fetchChunk(st, ci, entry, hi) {
         if (entry.aborted) throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
         entry.ctl = new AbortController(); // a download nobody wants any more (a seek, a newer video) can be cancelled
         // A chunk the player is waiting for is fetched as two halves at once: one connection tops out around 1.5 MB/s, two get it done in half the time.
-        const get = async (x, y) => { const r = await fetch(`${st.url}&range=${x}-${y}`, { headers: { 'User-Agent': PROXY_UA }, signal: entry.ctl.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return Buffer.from(await r.arrayBuffer()); };
+        const get = async (x, y) => { const r = await fetch(`${st.url}&range=${x}-${y}`, { headers: { 'User-Agent': st.ua || PROXY_UA }, signal: entry.ctl.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return Buffer.from(await r.arrayBuffer()); };
         const parts = hi && b - a > 256 * 1024 ? 2 : 1, mid = a + Math.floor((b - a + 1) / parts);
         const buf = parts === 2 ? Buffer.concat(await Promise.all([get(a, mid - 1), get(mid, b)])) : await get(a, b);
         if (buf.length !== b - a + 1) throw new Error('short read');
@@ -645,7 +649,7 @@ function ensureProxy() {
   return proxyPromise;
 }
 // Returns a loopback URL for a googlevideo URL, or the original URL if it can't be proxied.
-async function proxied(url, force, warm) {
+async function proxied(url, force, warm, ua) {
   if (!url || (cfg().bufferProxy === false && !force)) return url;
   let u; try { u = new URL(url); } catch { return url; }
   const size = Number(u.searchParams.get('clen'));
@@ -657,7 +661,7 @@ async function proxied(url, force, warm) {
   }
   const token = crypto.randomBytes(12).toString('hex'), dur = Number(u.searchParams.get('dur')) || 0, policy = bufferPolicy();
   // a buffer worth more than about 48 MB goes to disk
-  const st = { warm: !!warm, token, url, size, dur, mime: decodeURIComponent(u.searchParams.get('mime') || 'video/mp4'), chunks: new Map(), hot: new Map(), created: Date.now(), policy, lastCi: null };
+  const st = { ua: ua || null, warm: !!warm, token, url, size, dur, mime: decodeURIComponent(u.searchParams.get('mime') || 'video/mp4'), chunks: new Map(), hot: new Map(), created: Date.now(), policy, lastCi: null };
   st.disk = Math.min(policy.cap, dur ? (policy.secs * size) / dur : policy.cap) > 48 * MB;
   if (!st.disk) st.policy = { ...policy, cap: Math.min(policy.cap, 128 * MB) }; // a stream kept in memory never grows past this
   streamsMap.set(token, st);
@@ -783,22 +787,35 @@ function videoInfo(id) {
   return p;
 }
 const resolveKey = (id, q, c, perf, safe) => JSON.stringify([id, q, c.codec, c.fps, c.maxBitrate, c.audioLang, c.audioCodec, c.maxVideoBitrate, c.maxAudioBitrate, c.dataSaverRes, c.powerRes, !!perf.data, !!perf.power, !!safe]);
-function resolveVideo(id, quality, perf, safe) {
+// `fallbacks` (the real stream request, not a look-ahead): when yt-dlp is turned away, try the signed-in TV lookup (SmartTube's way, see
+// tvstream.js), then the plain 360p stream, and say what to do if nothing works.
+function resolveVideo(id, quality, perf, safe, fallbacks) {
   const c = cfg(), q = quality || c.quality || 'auto';
   perf = { data: !!perf?.data, power: !!perf?.power };
   const key = resolveKey(id, q, c, perf, safe), hit = resolveCache.get(key);
   if (hit && Date.now() - hit.at < 25 * 60 * 1000) return hit.p;
   const args = ['-g', '-f', streamFormat(q, c, perf), ...(safe || perf.data || perf.power ? [] : sortArgs(c)), '--no-playlist', `https://www.youtube.com/watch?v=${id}`];
+  const parse = (out, limited = false) => { const lines = out.trim().split('\n').filter(Boolean); if (!lines.length) throw new Error('No playable stream found.'); return { lines, limited }; };
   // Skipping yt-dlp's HLS lookup saves most of a second; the plain https formats are the ones used anyway. Live streams and the
   // odd video that only has HLS fail that way, so those are asked again the full way.
-  const full = ytdlp(['--extractor-args', 'youtube:skip=hls', ...args]).catch(() => ytdlp(args));
-  // If YouTube wants a sign-in for this video, ask as the Android app does: it still hands out one plain 360p stream, and the
-  // reason is passed on so the page can say how to get full quality (cookies).
-  const lowQ = (e) => ytdlp(['--extractor-args', 'youtube:player_client=android', '-g', '-f', 'b', '--no-playlist', `https://www.youtube.com/watch?v=${id}`])
-    .then((out) => ({ out, limited: true }), () => { throw e; });
-  const p = full.then((out) => ({ out, limited: false }), (e) => (BOT_RE.test(String(e.message)) ? lowQ(e) : Promise.reject(e)))
-    .then(({ out, limited }) => { const lines = out.trim().split('\n').filter(Boolean); if (!lines.length) throw new Error('No playable stream found.'); return { lines, limited }; },
-      (e) => { throw new Error(BOT_RE.test(String(e.message)) ? 'YouTube is asking this computer to prove it is not a bot, and this video has no stream without that. In Settings, Video & audio: first try "Update yt-dlp now" (Troubleshooting), then choose the browser you are signed in to YouTube with (Sign-in cookies).' : e.message); });
+  const attempt = HIDDEN && process.env.YT_TEST_BOT ? Promise.reject(new Error('ERROR: [youtube] test: Sign in to confirm you\u2019re not a bot.')) : ytdlp(['--extractor-args', 'youtube:skip=hls', ...args]).catch(() => ytdlp(args));   // (the test switch pretends YouTube turned yt-dlp away)
+  const p = (async () => {
+    let err;
+    try { return parse(await attempt); } catch (e) { err = e; }
+    if (!fallbacks) throw err;
+    const isBot = BOT_RE.test(String(err.message));
+    let tvErr = null;
+    if (c.signinFallback !== false && acc.read().active) {
+      try { const r = await tvStream.resolve(id, q, perf); return { lines: r.lines, limited: false, via: 'signin', ua: r.ua }; }
+      catch (e) { tvErr = e; }
+    }
+    if (isBot) {
+      // As the Android app asks, YouTube still hands out one plain 360p stream; the page says how to get full quality.
+      try { return parse(await ytdlp(['--extractor-args', 'youtube:player_client=android', '-g', '-f', 'b', '--no-playlist', `https://www.youtube.com/watch?v=${id}`]), true); } catch {}
+      throw new Error('YouTube is asking this computer to prove it is not a bot, and this video has no stream without that. ' + (acc.read().active ? `The lookup through your sign-in did not work either (${tvErr ? String(tvErr.message).slice(0, 140) : 'turned off in Settings'}). ` : 'Signing in (Settings, Accounts) lets the app look videos up through your account. ') + 'In Settings, Video & audio: try "Update yt-dlp now" (Troubleshooting), choose the browser you are signed in to YouTube with (Sign-in cookies), or switch off the VPN.');
+    }
+    throw err;
+  })();
   resolveCache.set(key, { p, at: Date.now() }); capMap(resolveCache, 24);
   p.catch(() => resolveCache.delete(key));
   return p;
@@ -966,12 +983,12 @@ const handlers = {
     const q = quality || c.quality || 'auto';
     perf = { data: !!perf?.data, power: !!perf?.power }; perfNow = perf;
     retireStreams(); // the video before this one stops downloading ahead
-    const r = await resolveVideo(id, q, perf, safe), lines = r.lines;
+    const r = await resolveVideo(id, q, perf, safe, true), lines = r.lines;
     const force = forceProxy || (c.stableAudio && c.stableAudio !== 'off');
-    const px = async (u, i) => (r.warm && takeWarm(r.warm[i])) || proxied(u, force);
-    const lim = !!r.limited;   // YouTube asked for a sign-in, so this is the plain 360p stream
-    if (q === 'audio') return { video: null, audio: await px(lines[0], 0), limited: lim };
-    return lines.length > 1 ? { video: await px(lines[0], 0), audio: await px(lines[1], 1), limited: lim } : { video: await px(lines[0], 0), audio: null, limited: lim };
+    const px = async (u, i) => (r.warm && takeWarm(r.warm[i])) || proxied(u, force, false, r.ua);
+    const lim = !!r.limited, via = r.via || '';   // limited: YouTube asked for a sign-in, so this is the plain 360p stream; via 'signin': looked up through the account
+    if (q === 'audio') return { video: null, audio: await px(lines[0], 0), limited: lim, via };
+    return lines.length > 1 ? { video: await px(lines[0], 0), audio: await px(lines[1], 1), limited: lim, via } : { video: await px(lines[0], 0), audio: null, limited: lim, via };
   },
   'yt:download'(id, kind, opts) {
     checkId(id);
@@ -1178,7 +1195,7 @@ const handlers = {
       `Electron ${process.versions.electron}, Chromium ${process.versions.chrome}, Node ${process.versions.node}`,
       `System: ${os.type()} ${os.release()} ${os.arch()}, session ${process.env.XDG_SESSION_TYPE || 'n/a'}, ${Math.round(os.totalmem() / 1048576)} MB RAM`,
       `yt-dlp: ${ytv} (JavaScript runtime for its challenges: this app's own engine, Node ${process.versions.node})`,
-      `Signed in: ${signed ? 'yes' : 'no'}`,
+      `Signed in: ${signed ? 'yes' : 'no'}${signed ? ' (last lookup through the sign-in: ' + (tvStream.status().last ? JSON.stringify(tvStream.status().last).slice(0, 300) : 'none') + ')' : ''}`,
       `Playing: ${playerPlaying ? 'yes' : 'no'}`,
       '', '--- settings (changed from the defaults are all listed) ---', hide(JSON.stringify(st)),
       '', '--- log file (warnings and errors, newest last) ---', hide(fileTail),

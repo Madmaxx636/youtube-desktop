@@ -1405,6 +1405,7 @@ const mediaReady = (el) => (el.readyState >= 3 ? Promise.resolve() : new Promise
 async function loadStream(id, quality, startAt, safe) {
   const my = ++loadSeq;
   const s = await api.stream(id, quality, !!sa.ctx || (settings.stableAudio || 'off') !== 'off', !!safe, { data: perf.data, power: perf.power });
+  if (s.via === 'signin' && !sessionStorage.getItem('signinNote')) { sessionStorage.setItem('signinNote', '1'); toast('YouTube turned this computer\'s lookup away, so this video was looked up through your sign-in.', 7000); }
   if (s.limited && current?.id === id) toast('YouTube asked for a sign-in, so this plays at 360p. For full quality choose your browser under Settings, Video & audio, Sign-in cookies.', 9000);
   if (my !== loadSeq || !current || current.id !== id) return; // another video was opened while this one was being looked up
   resetMedia();

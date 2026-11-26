@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.0
+
+- A second way to get streams, for when YouTube turns yt-dlp away ("Sign in to confirm you're not a bot", mostly a VPN or a hosting-company address). It works the way SmartTube does, and needs you to be signed in (Settings, Accounts). If yt-dlp fails, the app asks YouTube as a TV app would, with your account's own login, gets the stream addresses and unscrambles them itself, then plays them through the usual buffer. In tests it played 1080p and seeked through a one-hour video, and a lookup took about a fifth of a second once warm, against about three seconds for yt-dlp.
+- How it fits together: YouTube now gives the newest TV app only "server-side streaming" (no addresses a plain player can read), so the app uses the older TV identities, which still get ordinary addresses. They are tried in turn; the later ones also carry a proof-of-origin token made by running YouTube's own BotGuard script (the part SmartTube relies on). The scripts YouTube sends (BotGuard, and the function that unscrambles an address) run only in hidden, locked-down windows with no access to the app or to the network, never in the app itself.
+- It is a fallback only: with a working yt-dlp nothing changes. Nothing is written to your account (no history, likes or comments); it reads what a TV app reads. Settings, Video & audio, "When YouTube turns lookups away" switches it off. A one-time notice says when a video was looked up this way, and the bug report (Settings, About) shows the last lookup it made.
+- If neither works the error now says what to try (sign in, update yt-dlp, the cookies setting, or switch off the VPN).
+- Tested on a really blocked connection too: with a VPN on a hosting-company address, yt-dlp was refused for every video, and the installed build played one through the sign-in at 1080p (it needed the first, token-free identity) and seeked in it.
+
 ## 0.11.12
 
 - yt-dlp now gets a JavaScript runtime. YouTube hides some stream addresses behind a small puzzle (the "n" and signature challenges); yt-dlp can only solve it with a JavaScript runtime and looks for Deno by default, so on a computer without one it quietly lost formats (it printed "No supported JavaScript runtime could be found"). SmartTube ships the same solver for this. The app now starts yt-dlp with its own engine as the runtime (the app's program started as plain Node), so nothing extra has to be installed, on Linux or Windows. On a test video yt-dlp found 57 formats instead of 49 (including the 360p combined stream and more 720p and audio choices), with no slower lookups.
