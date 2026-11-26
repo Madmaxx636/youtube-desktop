@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.12
+
+- yt-dlp now gets a JavaScript runtime. YouTube hides some stream addresses behind a small puzzle (the "n" and signature challenges); yt-dlp can only solve it with a JavaScript runtime and looks for Deno by default, so on a computer without one it quietly lost formats (it printed "No supported JavaScript runtime could be found"). SmartTube ships the same solver for this. The app now starts yt-dlp with its own engine as the runtime (the app's program started as plain Node), so nothing extra has to be installed, on Linux or Windows. On a test video yt-dlp found 57 formats instead of 49 (including the 360p combined stream and more 720p and audio choices), with no slower lookups.
+- The bug report (Settings, About) says which JavaScript runtime yt-dlp uses.
+
 ## 0.11.11
 
 - "Sign in to confirm you're not a bot" no longer ends in a raw error. Cause of the report: YouTube changed what it asks of yt-dlp, and an older yt-dlp (2026.10.26) got that answer for every video. Updating yt-dlp to 2026.11.23 fixed it here, and now the app can do that itself: Settings, Video & audio, Troubleshooting, "Update yt-dlp now" (only for a copy that can replace itself, such as the one in ~/.local/bin or the Windows app's own; a package-manager copy is updated with the system).

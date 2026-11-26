@@ -274,10 +274,15 @@ function cookieArgs() {
   if (/^(firefox|chrome|chromium|brave|edge|vivaldi|opera|safari)$/.test(b)) return ['--cookies-from-browser', b];
   return [];
 }
+// YouTube hides some stream addresses behind a small puzzle (the "n" and signature challenges) that yt-dlp can only solve with a
+// JavaScript runtime, and it only looks for Deno by default, so with none found it silently loses formats (SmartTube ships the same
+// solver for this). This app already carries a JavaScript engine: its own program, started as plain Node (ELECTRON_RUN_AS_NODE).
+const ytdlpEnv = () => ({ ...process.env, ELECTRON_RUN_AS_NODE: '1' });
+const jsRuntimeArgs = () => ['--js-runtimes', 'node:' + process.execPath];
 const BOT_RE = /confirm you.?re not a bot|sign in to confirm|Please sign in/i;
 function ytdlp(args) {
   return new Promise((resolve, reject) => {
-    execFile(YTDLP, ['--no-warnings', '--no-update', ...cookieArgs(), ...args], { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(YTDLP, ['--no-warnings', '--no-update', ...jsRuntimeArgs(), ...cookieArgs(), ...args], { maxBuffer: 64 * 1024 * 1024, env: ytdlpEnv() }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message)); else resolve(stdout);
     });
   });
@@ -383,7 +388,7 @@ function downloadArgs(kind, o = {}, { playlist = false } = {}) {
 // One job runner for single videos and whole playlists: progress, final file path, cancel.
 function runJob(key, url, args, { playlist = false } = {}) {
   if (jobs.has(key)) throw new Error('That download is already running.');
-  const p = spawn(YTDLP, [...cookieArgs(), ...args, playlist ? '--yes-playlist' : '--no-playlist', url]);
+  const p = spawn(YTDLP, [...jsRuntimeArgs(), ...cookieArgs(), ...args, playlist ? '--yes-playlist' : '--no-playlist', url], { env: ytdlpEnv() });
   jobs.set(key, p);
   let item = 0, total = 0, pct = 0, file = '', errText = '';
   const send = (x) => win?.webContents.send('download-progress', { id: key, item, total, pct, file, ...x });
@@ -1172,7 +1177,7 @@ const handlers = {
       `Version: ${thisVersion()}${isDeb() ? ' (deb)' : ''}`,
       `Electron ${process.versions.electron}, Chromium ${process.versions.chrome}, Node ${process.versions.node}`,
       `System: ${os.type()} ${os.release()} ${os.arch()}, session ${process.env.XDG_SESSION_TYPE || 'n/a'}, ${Math.round(os.totalmem() / 1048576)} MB RAM`,
-      `yt-dlp: ${ytv}`,
+      `yt-dlp: ${ytv} (JavaScript runtime for its challenges: this app's own engine, Node ${process.versions.node})`,
       `Signed in: ${signed ? 'yes' : 'no'}`,
       `Playing: ${playerPlaying ? 'yes' : 'no'}`,
       '', '--- settings (changed from the defaults are all listed) ---', hide(JSON.stringify(st)),
