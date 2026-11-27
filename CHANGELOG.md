@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0
+
+- Playlists: previous and next buttons beside the play button (Shift+P and Shift+N too), and a playlist panel in the right column with the whole list, the current video highlighted and a counter. Click any entry to jump to it. "Play all", "Shuffle play" and pasted links that carry a playlist (`watch?v=…&list=…`) now all play through the list.
+- Comments no longer wait for the video details, so they load even when the details are slow or fail. A failed load is retried, and then shows a "Try again" button.
+- Channel pictures that YouTube left out of its lists (search rows, subscriptions, the watch page) are now looked up and remembered, and replaced when an address has gone stale.
+- The CC button in the player is now a plain on/off switch. Choosing the language lives in the three-dots menu under Subtitles.
+
 ## 0.12.0
 
 - A second way to get streams, for when YouTube turns yt-dlp away ("Sign in to confirm you're not a bot", mostly a VPN or a hosting-company address). It works the way SmartTube does, and needs you to be signed in (Settings, Accounts). If yt-dlp fails, the app asks YouTube as a TV app would, with your account's own login, gets the stream addresses and unscrambles them itself, then plays them through the usual buffer. In tests it played 1080p and seeked through a one-hour video, and a lookup took about a fifth of a second once warm, against about three seconds for yt-dlp.

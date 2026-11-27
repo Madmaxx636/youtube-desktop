@@ -1022,3 +1022,10 @@ body.touch .np-row{padding:14px}
 #rc-chip-next .ico{width:20px;height:20px}
 
 .ab-help{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+
+.up-pl .up-pt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.up-pl .up-pa{color:var(--fg2);font-size:.85em;padding:0 4px 6px}
+.up-plist{max-height:340px;overflow-y:auto}
+.up-row.cur{background:var(--bg3)}
+.up-n{width:20px;text-align:center;color:var(--fg2);font-size:.8em;flex-shrink:0}
+.up-n .ico{width:12px;height:12px}

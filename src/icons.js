@@ -26,6 +26,7 @@ const ICON_PATHS = {
   rewind: '<path d="M11 6l-7 6 7 6zM20 6l-7 6 7 6z"/>',
   forward: '<path d="M13 6l7 6-7 6zM4 6l7 6-7 6z"/>',
   next: '<path d="M5 5l10 7-10 7zM19 5v14"/>',
+  prev: '<path d="M19 5L9 12l10 7zM5 5v14"/>',
   vol: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
   vollow: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/>',
   fs: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',

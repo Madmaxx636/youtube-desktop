@@ -366,6 +366,21 @@ function renderUpNext() {
   const box = document.createElement('div'); box.id = 'up-head';
   box.innerHTML = `<div class="up-top"><h3>Up next</h3><label class="up-auto" title="What happens when a video ends"><span>Autoplay</span><select class="up-mode">${AUTO_MODES.map(([k, l]) => `<option value="${k}" ${autoMode() === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>`;
   box.querySelector('select').onchange = (e) => save({ autoplayMode: e.target.value }).then(() => { paintAuto(); renderUpNext(); });
+  if (playlistCtx && playlistCtx.length > 1) {
+    const idx = playlistCtx.findIndex((x) => x.id === current?.id);
+    const pl = document.createElement('div'); pl.className = 'up-queue up-pl';
+    pl.innerHTML = `<div class="up-qh"><span class="up-pt">${esc(plInfo?.title || 'Playlist')}</span><span class="cnt">${idx >= 0 ? idx + 1 + ' / ' : ''}${playlistCtx.length}</span><button class="link" title="Stop playing from this playlist">${ic('x')}</button></div>${plInfo?.author ? `<div class="up-pa">${esc(plInfo.author)}</div>` : ''}<div class="up-plist"></div>`;
+    const lst = pl.querySelector('.up-plist');
+    playlistCtx.forEach((v, i) => {
+      const r = document.createElement('div'); r.className = 'up-row' + (i === idx ? ' cur' : '');
+      r.innerHTML = `<span class="up-n">${i === idx ? ic('play') : i + 1}</span><img loading="lazy" src="${esc(v.thumb)}"><span class="t">${esc(v.title)}<small>${esc(v.channel || '')}</small></span>`;
+      r.onclick = () => { if (i !== idx) openVideo(v, { replace: true, keep: true }); };
+      lst.appendChild(r);
+    });
+    pl.querySelector('.up-qh button').onclick = () => { playlistCtx = null; plInfo = null; renderUpNext(); paintNav(); };
+    box.appendChild(pl);
+    requestAnimationFrame(() => { const c = lst.querySelector('.cur'); if (c) lst.scrollTop = Math.max(0, c.offsetTop - lst.offsetTop - 40); });
+  }
   if (userQueue.length) {
     const q = document.createElement('div'); q.className = 'up-queue';
     q.innerHTML = `<div class="up-qh">Queue <span class="cnt">${userQueue.length}</span><button class="link">Clear</button></div>`;
@@ -378,7 +393,7 @@ function renderUpNext() {
     q.querySelector('.up-qh button').onclick = () => { userQueue = []; renderUpNext(); renderTabs(); };
     box.appendChild(q);
   }
-  rel.prepend(box);
+  rel.prepend(box); paintNav();
 }
 const fmtDur = (s) => { s = Math.round(+s || 0); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
 function videoMenu(v, el) {
@@ -543,6 +558,13 @@ function parseYtLink(q) {
   const v = /(?:youtube\.com\/watch\?(?:[^ ]*&)?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{11})/.exec(q);
   const pl = /[?&]list=([\w-]{13,})/.exec(q) || (/^(PL|OL|UU|FL|RD)[\w-]{10,}$/.test(q) ? [0, q] : null);
   const ch = /youtube\.com\/channel\/(UC[\w-]{22})/.exec(q);
+  if (v && pl && /^(PL|OL|UU|FL)/.test(pl[1])) return async () => {
+    try {
+      const p = await api.playlist(pl[1]); const i = Math.max(0, p.videos.findIndex((x) => x.id === v[1]));
+      if (p.videos[i]) return openVideo(p.videos[i], { list: p.videos, listInfo: { id: p.id, title: p.title, author: p.author } });
+    } catch {}
+    openVideo({ id: v[1], title: 'Loading…', channel: '', thumb: '' });
+  };
   if (v) return () => openVideo({ id: v[1], title: 'Loading…', channel: '', thumb: '' });
   if (pl) return () => openPlaylist(pl[1]);
   if (ch) return () => openChannel(ch[1]);
@@ -695,7 +717,7 @@ function listRow(v, opts = {}) {
     e.stopPropagation(); const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.q === 'later') { toggleList('watchlater', v); toast(inList('watchlater', v.id) ? 'Saved to Watch later' : 'Removed from Watch later'); } else queueAdd(v, false);
   };
-  el.onclick = (e) => { const c = e.target.closest('[data-ch]'); if (c) { e.stopPropagation(); return openChannel(c.dataset.ch); } queue = opts.queue || [v]; openVideo(v, { list: opts.playlist ? queue : null }); };
+  el.onclick = (e) => { const c = e.target.closest('[data-ch]'); if (c) { e.stopPropagation(); return openChannel(c.dataset.ch); } queue = opts.queue || [v]; openVideo(v, { list: opts.playlist ? queue : null, listInfo: opts.info }); };
   addDots(el, v);
   applyDeArrow(el, v);
   return el;
@@ -720,9 +742,9 @@ function renderPlaylistPage(pl, opt = {}) {
     <section class="pl-list2" id="pl-list"></section></div>`;
   const list = $('#pl-list');
   if (!vids.length) list.innerHTML = '<div class="hint" style="padding:24px 0">This playlist has no videos.</div>';
-  for (const v of vids) list.appendChild(listRow(v, { queue: vids, playlist: true }));
+  for (const v of vids) list.appendChild(listRow(v, { queue: vids, playlist: true, info: { id: pl.id, title: pl.title, author: pl.author } }));
   box.querySelector('[data-ch]')?.addEventListener('click', (e) => openChannel(e.target.dataset.ch));
-  $('#pl-play').onclick = () => { if (vids[0]) { queue = vids; openVideo(vids[0], { list: vids }); } };
+  $('#pl-play').onclick = () => { if (vids[0]) { queue = vids; openVideo(vids[0], { list: vids, listInfo: { id: pl.id, title: pl.title, author: pl.author } }); } };
   const dl = async (kind) => {
     $('#pl-progress').textContent = 'Starting…'; $('#pl-cancel').hidden = false;
     try { await startPlaylistDownload(pl.id, pl.title, kind); } catch (e) { $('#pl-progress').textContent = 'Could not start: ' + e.message; $('#pl-cancel').hidden = true; }
@@ -738,7 +760,7 @@ function renderPlaylistPage(pl, opt = {}) {
     $('#pl-share').onclick = () => { api.copy(link); toast('Link copied'); };
   }
   $('#pl-more').onclick = () => {
-    const items = [{ id: 'shuffle', label: 'Shuffle play' }], run = { shuffle: () => { if (vids.length) { queue = [...vids].sort(() => Math.random() - 0.5); openVideo(queue[0], { list: queue }); } } };
+    const items = [{ id: 'shuffle', label: 'Shuffle play' }], run = { shuffle: () => { if (vids.length) { queue = [...vids].sort(() => Math.random() - 0.5); openVideo(queue[0], { list: queue, listInfo: { id: pl.id, title: pl.title + ' (shuffled)', author: pl.author } }); } } };
     if (!opt.local) {
       items.push({ type: 'separator' }, { id: 'dlv', label: 'Download all (video)' }, { id: 'dla', label: 'Download all (MP3)' }, { type: 'separator' }, { id: 'copy', label: 'Copy link' }, { id: 'web', label: 'Open on youtube.com' });
       run.dlv = () => dl('video'); run.dla = () => dl('audio'); run.copy = () => { api.copy(link); toast('Link copied'); }; run.web = () => api.openExternal(link);
@@ -752,6 +774,49 @@ async function openPlaylist(id) {
   try { renderPlaylistPage(await memoCall('p:' + id, () => api.playlist(id), 60 * 1000)); }
   catch (e) { box.hidden = true; grid.hidden = false; setStatus('Could not open this playlist: ' + e.message); }
 }
+
+// ---------- channel pictures: lists from YouTube often leave them out, so look the missing ones up (and remember them) ----------
+const avCache = lsGet('avatars', {}), avFailed = new Set(), avWait = new Map(), avQueue = []; let avBusy = 0, avSaveT = 0;
+function avatarFor(id) {
+  if (avCache[id]) return Promise.resolve(avCache[id]);
+  if (avFailed.has(id)) return Promise.resolve('');
+  if (!avWait.has(id)) avWait.set(id, new Promise((res) => { avQueue.push([id, res]); avPump(); }));
+  return avWait.get(id);
+}
+function avPump() {
+  while (avBusy < 3 && avQueue.length) {
+    const [id, res] = avQueue.shift(); avBusy++;
+    api.channelAvatar(id).then((u) => {
+      if (u) { avCache[id] = u; clearTimeout(avSaveT); avSaveT = setTimeout(() => { const k = Object.keys(avCache); for (const x of k.slice(0, Math.max(0, k.length - 1500))) delete avCache[x]; lsSet('avatars', avCache); }, 2000); } else avFailed.add(id);
+      res(u || '');
+    }).catch(() => { avFailed.add(id); res(''); }).finally(() => { avBusy--; avWait.delete(id); avPump(); });
+  }
+}
+const AV_SPOTS = [ // [where it is, which channel, the picture inside it]
+  ['.vrow .chan', (e) => e.querySelector('[data-ch]')?.dataset.ch, (e) => e.querySelector('img') || e.insertAdjacentElement('afterbegin', Object.assign(document.createElement('img'), { loading: 'lazy' }))],
+  ['.sbc[data-c]', (e) => e.dataset.c, (e) => e.querySelector('img')],
+  ['.ss[data-c]', (e) => e.dataset.c, (e) => e.querySelector('img')],
+  ['.sg-head img[data-open]', (e) => e.dataset.open, (e) => e],
+  ['.mrow', (e) => e.querySelector('.n')?._ch, (e) => e.querySelector('img')],
+  ['#w-avatar', () => current?.channelId, (e) => e],
+];
+function avFill(root) {
+  for (const [sel, idOf, imgOf] of AV_SPOTS) {
+    const list = root.matches?.(sel) ? [root] : [...(root.querySelectorAll?.(sel) || [])];
+    for (const e of list) {
+      const id = idOf(e); if (!/^UC[\w-]{22}$/.test(id || '')) continue;
+      const img = imgOf(e); if (!img || img.getAttribute('src') || img.dataset.avTried === id) continue;
+      img.dataset.avTried = id;
+      avatarFor(id).then((u) => { if (u && !img.getAttribute('src') && idOf(e) === id) img.src = u; });
+    }
+  }
+}
+let avT = 0;
+new MutationObserver(() => { clearTimeout(avT); avT = setTimeout(() => avFill(document.body), 150); }).observe(document.body, { childList: true, subtree: true });
+document.addEventListener('error', (e) => { // a picture whose address went stale: ask for a fresh one
+  const img = e.target; if (!(img instanceof HTMLImageElement) || !img.getAttribute('src')) return;
+  if (img.closest('.chan, .sbc, .ss, .sg-head, .mrow') || img.id === 'w-avatar') { img.removeAttribute('src'); delete img.dataset.avTried; clearTimeout(avT); avT = setTimeout(() => avFill(document.body), 150); }
+}, true);
 
 // ---------- channel pages (header, banner, tabs, shelves, sorting, endless paging) ----------
 let chanState = null;
@@ -1103,7 +1168,7 @@ function showManageSubs() {
   for (const c of list) {
     const row = document.createElement('div'); row.className = 'mrow'; row.style.gridColumn = '1/-1';
     row.innerHTML = `<img ${c.avatar ? `src="${esc(c.avatar)}"` : ''}><span class="n linkish">${esc(c.name || c.id)}</span><button>Unsubscribe</button>`;
-    row.querySelector('.n').onclick = () => openChannel(c.id);
+    row.querySelector('.n')._ch = c.id; row.querySelector('.n').onclick = () => openChannel(c.id);
     row.querySelector('button').onclick = async (e) => { e.target.disabled = true; await setSub(c, false); if (!isSub(c.id)) row.remove(); else e.target.disabled = false; };
     grid.appendChild(row);
   }
@@ -1245,7 +1310,7 @@ function makeTool(id) {
   return el;
 }
 // Fixed buttons in the video's bottom bar, left of the ⋮: theater, captions, sleep timer, quality (each can be turned off in Settings).
-const PQ = [['pbCaptions', 'captions', 'cc', 'Captions'], ['pbQuality', 'quality', 'gear', 'Quality'], ['pbSpeed', 'speed', 'forward', 'Speed'], ['pbSleep', 'sleep', 'moon', 'Sleep timer'], ['pbTheater', 'theater', 'theater', 'Theater mode (T)']];
+const PQ = [['pbCaptions', 'captions', 'cc', 'Captions on / off (C)'], ['pbQuality', 'quality', 'gear', 'Quality'], ['pbSpeed', 'speed', 'forward', 'Speed'], ['pbSleep', 'sleep', 'moon', 'Sleep timer'], ['pbTheater', 'theater', 'theater', 'Theater mode (T)']];
 function renderPQuick() {
   const box = $('#p-quick'); if (!box) return;
   const items = PQ.filter(([k]) => settings[k]);
@@ -1258,6 +1323,7 @@ function renderPQuick() {
     b.onclick = (e) => {
       e.stopPropagation();
       if (page === 'theater') return save({ theater: !settings.theater });
+      if (page === 'captions') return toggleCaptions();
       const m = $('#p-menu');
       if (!m.hidden && pmPage === page) return closeP();
       pmPage = page; m.hidden = false; $('#p-gear').classList.add('open'); renderPMenu();
@@ -1482,14 +1548,14 @@ async function openVideo(v, opts = {}) {
   if (!opts.stay) navPush('video', { v }, { replace: !!opts.replace });
   saveProgress(); histTime(); histSent = null; // keep where you left the previous video, and report it
   ++loadSeq; resetMedia(); video.poster = v.thumb || ''; pbox.classList.add('loading'); // stop the old one at once; the picture shows while the new one is found
-  if (opts.list !== undefined) playlistCtx = opts.list; else if (!opts.keep) playlistCtx = null;
+  if (opts.list !== undefined) { playlistCtx = opts.list; plInfo = opts.list ? opts.listInfo || plInfo : null; } else if (!opts.keep) { playlistCtx = null; plInfo = null; }
   hideEndScreen(); relatedVids = []; relAll = []; relDone = false; relPages = 0; $('#rc-chips').innerHTML = ''; setChapters([]);
   current = v; segments = []; streamRetries = 0;
   if (opts.stay) updateAway();
   if (!opts.stay) { $('#main').hidden = true; $('#watch').hidden = false; $('#watch').scrollTop = 0; $('#watch').classList.remove('away'); syncSideAuto(); }
   renderTabs(); if (!document.hasFocus() || document.hidden) api.notify('playing', 'Now playing', v.title || '', v.id).catch(() => {});
   $('#w-title').textContent = v.title;
-  $('#w-ch').textContent = v.channel || ''; $('#w-subs').textContent = ''; $('#r-likes').textContent = ''; $('#r-dislikes').textContent = ''; updateRateButtons(); $('#w-avatar').removeAttribute('src');
+  $('#w-ch').textContent = v.channel || ''; $('#w-subs').textContent = ''; $('#r-likes').textContent = ''; $('#r-dislikes').textContent = ''; updateRateButtons(); $('#w-avatar').removeAttribute('src'); delete $('#w-avatar').dataset.avTried;
   $('#w-stats').textContent = [v.views, v.published].filter(Boolean).join(' • ');
   $('#w-desc-text').textContent = ''; $('#c-list').innerHTML = ''; $('#c-more').innerHTML = ''; $('#c-note').innerHTML = ''; $('#c-find').value = ''; $('#c-title').textContent = 'Comments';
   commentSort = settings.commentsSortDefault || 'TOP_COMMENTS'; $('#c-sort').value = commentSort; cState = { id: v.id, more: null, hidden: 0, total: '', shown: 0, showHidden: false, force: false }; renderComposer(); $('#related').innerHTML = ''; renderUpNext(); chapters = []; $('#w-chapters').hidden = true;
@@ -1512,6 +1578,7 @@ async function openVideo(v, opts = {}) {
   loadStream(v.id, settings.quality || 'auto', startAt).catch((e) => { if (current?.id === v.id) { pbox.classList.remove('loading'); $('#w-stats').textContent = 'Could not load stream: ' + e.message; } });
   navigator.mediaSession && (navigator.mediaSession.metadata = new MediaMetadata({ title: v.title, artist: v.channel, artwork: v.thumb ? [{ src: v.thumb }] : [] }));
   loadSegments(v.id); loadVotes(v.id);
+  loadComments(v.id); // does not wait for the details: they can fail or be slow without taking the comments with them
   try {
     const info = await infoP;
     if (!info || !current || current.id !== v.id) return;
@@ -1519,7 +1586,7 @@ async function openVideo(v, opts = {}) {
     $('#w-title').textContent = info.title || v.title;
     $('#w-ch').textContent = info.channel || v.channel; $('#w-ch').onclick = () => info.channelId && openChannel(info.channelId);
     $('#w-subs').textContent = info.subs || '';
-    if (info.channelThumb) $('#w-avatar').src = info.channelThumb;
+    if (info.channelThumb) $('#w-avatar').src = info.channelThumb; else avFill($('#w-avatar'));
     if (info.likes && !$('#r-likes').textContent) $('#r-likes').textContent = fmtNum(info.likes);
     daBranding(v.id).then((b) => { const r = daPick(b, v.id); if (settings.dearrow && !perf.data && r?.title && current?.id === v.id) { $('#w-title').title = info.title || v.title; $('#w-title').textContent = r.title; } });
 
@@ -1530,7 +1597,6 @@ async function openVideo(v, opts = {}) {
     relAll = info.related; relChip = 'all'; paintRelated(); relFill();
     setChapters(info.chapters?.length ? info.chapters : parseChapters(info.description));
     relatedVids = info.related.filter((x) => !x.isShort);
-    loadComments(v.id);
     if (info.captionTracks) setCaptionTracks(info.captionTracks); else loadCaptionList(v.id);
   } catch {}
 }
@@ -1658,7 +1724,13 @@ async function loadComments(id, more) {
   }
   moreBox.innerHTML = '<div class="hint">Loading comments…</div>';
   try {
-    const r = await api.comments(id, commentSort, more ? cState.more : undefined);
+    let r;
+    for (let n = 0; ; n++) {
+      try { r = await api.comments(id, commentSort, more ? cState.more : undefined); if (r.comments.length || more || n >= 1) break; }
+      catch (e) { if (n >= 2 || !current || current.id !== id) throw e; }
+      await new Promise((ok) => setTimeout(ok, 700 * (n + 1)));
+      if (!current || current.id !== id) return;
+    }
     if (!current || current.id !== id) return;
     cState.more = r.more || null; if (r.total) cState.total = r.total;
     if (!more) cState.hidden = 0;
@@ -1670,7 +1742,11 @@ async function loadComments(id, more) {
     moreBox.innerHTML = cState.more ? '<button id="c-morebtn">Show more comments</button>' : (cState.shown ? '' : '<div class="hint">No comments to show.</div>');
     if (cState.more) $('#c-morebtn').onclick = () => loadComments(id, true);
     updateCommentNote(); filterComments();
-  } catch { moreBox.innerHTML = '<div class="hint">Comments unavailable.</div>'; }
+  } catch (e) {
+    if (!current || current.id !== id) return;
+    moreBox.innerHTML = `<div class="hint">Could not load comments. <button id="c-retry" class="link">Try again</button></div>`;
+    $('#c-retry').onclick = () => loadComments(id, more);
+  }
 }
 function filterComments() {
   const q = ($('#c-find').value || '').trim().toLowerCase();
@@ -1853,9 +1929,20 @@ function setCaptionTracks(list) {
 async function loadCaptionList(id) {
   try { const l = await api.subsList(id); if (current?.id === id) setCaptionTracks(l); } catch {}
 }
+let lastCapVal = '';
+// The CC button in the player: on or off. Which language it uses is chosen in the three-dots menu (Subtitles).
+function toggleCaptions() {
+  if (capLang) { chooseCaption(''); return; }
+  if (!capTracks.length) { toast('This video has no captions'); return; }
+  const want = (settings.subLang || '').toLowerCase();
+  const pick = capTracks.find((t) => t.lang + (t.auto ? '|a' : '|m') === lastCapVal)
+    || (want && (capTracks.find((x) => x.lang.toLowerCase() === want && !x.auto) || capTracks.find((x) => x.lang.toLowerCase() === want) || capTracks.find((x) => x.lang.toLowerCase().startsWith(want))))
+    || capTracks.find((t) => !t.auto) || capTracks[0];
+  chooseCaption(pick.lang + (pick.auto ? '|a' : '|m'));
+}
 async function chooseCaption(val) {
   if (!val) { capLang = ''; setCaptionTrack(null); renderToolbar(); return; }
-  const [lang, kind] = val.split('|'); capLang = val; renderToolbar();
+  const [lang, kind] = val.split('|'); capLang = val; lastCapVal = val; renderToolbar();
   try { setCaptionTrack(await api.subsGet(current.id, lang, kind === 'a')); }
   catch (e) { capLang = ''; renderToolbar(); toast('Captions unavailable: ' + e.message); }
 }
@@ -1978,7 +2065,7 @@ video.addEventListener('ended', () => {
 // The main process needs to know whether something is playing (for the mini player's open-on-minimize option).
 for (const ev of ['play', 'pause']) video.addEventListener(ev, () => api.sendState({ src: video.currentSrc, audio: audioActive ? audio.currentSrc : null, time: video.currentTime, playing: !video.paused }));
 // Autoplay: 'endless' keeps going into the suggested videos, 'queue' only moves on through your queue or the playlist you are in, 'off' never does.
-let playlistCtx = null;
+let playlistCtx = null, plInfo = null;
 const autoMode = () => settings.autoplayMode || 'endless';
 const AUTO_MODES = [['endless', 'Endless', 'Keep playing suggested videos'], ['queue', 'Queue or playlist only', 'Only play on when there is a queue or a playlist'], ['off', 'Off', 'Stop after each video']];
 const autoAllows = (kind) => autoMode() === 'endless' || (autoMode() === 'queue' && kind !== 'related');
@@ -1987,6 +2074,20 @@ function nextVideo() {
   if (playlistCtx) { const i = playlistCtx.findIndex((x) => x.id === current?.id); if (i >= 0 && playlistCtx[i + 1]) return { v: playlistCtx[i + 1], kind: 'playlist' }; }
   const r = relatedVids.find((x) => x.id !== current?.id && !x.isShort);
   return r ? { v: r, kind: 'related' } : null;
+}
+function prevVideo() {
+  if (!playlistCtx) return null;
+  const i = playlistCtx.findIndex((x) => x.id === current?.id);
+  return i > 0 ? playlistCtx[i - 1] : null;
+}
+function playPrev() {
+  const p = prevVideo(); if (!p) { video.currentTime = 0; return; }
+  openVideo(p, { replace: true, stay: awayNow(), keep: true });
+}
+function paintNav() {
+  const pv = $('#pc-prev'), nx = $('#pc-next'); if (!pv || !nx) return;
+  const hasPrev = !!prevVideo(); pv.hidden = !hasPrev;
+  nx.hidden = !nextVideo();
 }
 function playNext(manual) {
   const n = nextVideo();
@@ -1999,14 +2100,14 @@ function playNext(manual) {
 api.onMedia((c) => {
   if (c === 'toggle') video.paused ? video.play() : video.pause();
   else if (c === 'next') playNext(true);
-  else if (c === 'prev') video.currentTime = 0;
+  else if (c === 'prev') playPrev();
   else if (c === 'mini-closed') { video.play().catch(() => {}); }
   else if (c === 'mini-ready') api.sendState({ src: video.currentSrc, audio: audioActive ? audio.currentSrc : null, time: video.currentTime, play: true }), video.pause();
   else if (c.startsWith('mini-time:')) video.currentTime = parseFloat(c.slice(10)) || video.currentTime;
 });
 if (navigator.mediaSession) {
   navigator.mediaSession.setActionHandler('nexttrack', playNext);
-  navigator.mediaSession.setActionHandler('previoustrack', () => (video.currentTime = 0));
+  navigator.mediaSession.setActionHandler('previoustrack', playPrev);
 }
 
 // ---------- in-player settings menu (quality, speed, subtitles, sleep timer, buffer) ----------
@@ -2319,6 +2420,8 @@ for (const ev of ['timeupdate', 'progress', 'durationchange', 'loadedmetadata', 
 });
 document.addEventListener('fullscreenchange', paintBar);
 $('#pc-play').onclick = () => (video.paused ? video.play().catch(() => {}) : video.pause());
+$('#pc-prev').onclick = () => playPrev();
+$('#pc-next').onclick = () => playNext(true);
 $('#pc-mute').onclick = () => { video.muted = !video.muted; if (!video.muted && video.volume === 0) video.volume = 0.5; };
 $('#pc-vol').oninput = (e) => { video.muted = false; video.volume = +e.target.value; };
 const toggleFs = () => (document.fullscreenElement ? document.exitFullscreen() : pbox.requestFullscreen());
@@ -2877,13 +2980,13 @@ document.addEventListener('keydown', (e) => {
   if ($('#watch').hidden) return;
   const k = e.key.toLowerCase();
   if (e.shiftKey && k === 'n') { playNext(true); return; }
-  if (e.shiftKey && k === 'p') { if (video.currentTime > 3) video.currentTime = 0; else if (navIdx > 0) navGo(-1); return; }
+  if (e.shiftKey && k === 'p') { if (prevVideo()) playPrev(); else if (video.currentTime > 3) video.currentTime = 0; else if (navIdx > 0) navGo(-1); return; }
   if (/^[0-9]$/.test(e.key) && video.duration) { video.currentTime = video.duration * (+e.key / 10); return; }
   if (k === 'home') { video.currentTime = 0; return; }
   if (k === 'end' && video.duration) { video.currentTime = video.duration - 0.1; return; }
   if (!e.shiftKey && k === ',' && video.paused) { video.currentTime -= 1 / 30; return; }
   if (!e.shiftKey && k === '.' && video.paused) { video.currentTime += 1 / 30; return; }
-  if (k === 'c') { if (capLang) chooseCaption(''); else { const t = capTracks.find((x) => !x.auto) || capTracks[0]; if (t) chooseCaption(t.lang + (t.auto ? '|a' : '|m')); else toast('No subtitles for this video'); } return; }
+  if (k === 'c') { toggleCaptions(); return; }
   if (k === 'i') { api.mini(true); return; }
   if (k === ' ' || k === 'k') { e.preventDefault(); video.paused ? video.play() : video.pause(); }
   else if (k === 't') save({ theater: !settings.theater });

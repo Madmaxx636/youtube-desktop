@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   commentLike: (cid, on) => call('me:commentLike', cid, on),
   channel: (id) => call('yt:channel', id),
   channelInfo: (id) => call('yt:channelInfo', id),
+  channelAvatar: (id) => call('yt:avatar', id),
   channelTab: (id, tab, sort, cont) => call('yt:channelTab', id, tab, sort, cont),
   meProgress: () => call('me:progress'),
   stream: (id, q, force, safe, perf) => call('yt:stream', id, q, force, safe, perf),

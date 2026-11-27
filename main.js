@@ -969,6 +969,12 @@ const handlers = {
     if (!shelves.length) { const v = collectVideos(h.videos || []); if (v.length) shelves.push({ title: 'Videos', videos: v, playlists: [], channels: [] }); }
     return { shelves };
   },
+  // Just the picture of a channel, for places where the lists YouTube sent did not carry one.
+  async 'yt:avatar'(id) {
+    if (!/^UC[\w-]{22}$/.test(String(id || ''))) throw new Error('Bad channel id.');
+    const ch = await (await innertube()).getChannel(id);
+    return (thumb(ch.metadata?.avatar) || '').replace(/=s\d+-/, '=s88-');
+  },
   async 'yt:channel'(id) {
     const i = await innertube();
     const ch = await i.getChannel(id);
